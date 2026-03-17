@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: tchopetyamo-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - tchopetyamo-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: tchopetyamo-api
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/tchopetyamo
+      - PORT=3001
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - tchopetyamo-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    container_name: tchopetyamo-agent
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - API_URL=http://api:3001
+      - MCP_SERVER_PATH=/app/mcp-server/index.js
+      - PORT=3000
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - tchopetyamo-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  chat-ui:
+    build:
+      context: ./chat-ui
+      dockerfile: Dockerfile
+    container_name: tchopetyamo-chat-ui
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      agent:
+        condition: service_healthy
+    networks:
+      - tchopetyamo-net
+
+volumes:
+  mongodb_data:
+
+networks:
+  tchopetyamo-net:
+    driver: bridge

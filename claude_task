@@ -1,0 +1,299 @@
+Build a complete restaurant AI agent application for Tchopetyamo restaurant. The project directory is `/home/user/Vibe coding/Github copilot project/restaurant-ai/`. Create ALL files using the Write tool.
+
+## Architecture
+1. **`api/`** - Express.js CRUD API (port 3001) + MongoDB
+2. **`mcp-server/`** - MCP server (stdio transport) with tools that call the CRUD API
+3. **`agent/`** - Express.js server (port 3000) using Anthropic SDK + MCP client, exposes HTTP chat endpoint
+4. **`chat-ui/`** - Vue 3 + Vite app (port 5173), Claude-like chat UI
+
+## Restaurant Data (from screenshots)
+**BEIGNETS:**
+- BHB - XAF 1500
+- BH - XAF 1000
+- BH 2 ailes - XAF 2000
+- Portion de haricot - XAF 600
+- Bouillie - XAF 600
+- Portion de beignets maïs - XAF 600
+- Portion de beignets farine - XAF 600, available: false (épuisé)
+- Promotion - XAF 100
+
+**SALADES:**
+- Salade bitchakala - XAF 2500
+- Salade de fruits - XAF 2200
+- Salade simple - XAF 1500
+
+**BOISSON:**
+- Yamo Lemon - XAF 1500
+- Yamo Ananas - XAF 1500
+- DJARA - XAF 1000
+- Abangalafa - XAF 2000
+- Yaourt bikutsi - XAF 2500
+
+**POULETS:**
+- Ndogmangolo soya/poulet (New) - XAF 2500
+- Poulet pané - XAF 1100
+- Frites de plantain - XAF 600
+- Poulet braisé - XAF 2800
+
+**BURGER:**
+- Burger poulet - XAF 3000
+- Burger boeuf - XAF 3500
+
+**MENUS_COMPOSES:**
+- Menu spécial - XAF 4000 (3 morceaux de poulets + frites)
+- Menu 1 - XAF 3500 (Beignet haricot bouillie + morceau de poulet + djara ou salade de fruits)
+- Menu 2 - XAF 3000 (Beignet haricot bouillie + 2 ailes de poulets + djara)
+- Menu 3 - XAF 3000 (3 ailes de poulets + frites + djara)
+- Menu 4 - XAF 3300 (Ndogmangolo + frites + djara)
+- Menu 5 - XAF 3800 (2 morceaux de poulets + frites + djara)
+- Menu 6 - XAF 2800 (1 morceau de poulet + frites + djara)
+- Menu 7 - XAF 3800 (2 morceaux de poulets + frite + djara)
+- Menu 8 - XAF 2500 (5 ailes de poulets)
+- Menu 9 - XAF 5000 (salade simple + 2 morceaux de poulets + frites + djara)
+- Menu 10 - XAF 4300 (Ndogmangolo + glace)
+- Menu 11 - XAF 4700 (Ndogmangolo + frite + morceau de poulet + djara)
+- Menu 12 - XAF 4000 (Beignet haricot bouillie + 2 ailes + dessert)
+- Menu 13 - XAF 3000 (Frites de pommes + haricot + 2 ailes de poulets)
+- Menu 14 - XAF 4800 (Ndogmangolo + frites de patate + salade simple)
+- Menu pour 2 - XAF 12000 (4 ailes de poulets + 4 morceaux de poulets + 2 frites + 2 djara + 2 salades simples)
+- Menu pour 3 - XAF 16000 (6 morceaux de poulets + ailes de poulets + 3 portions de frites + 3 djara + 3 salades simples)
+- Menu pour 4 - XAF 24000 (8 morceaux de poulets + 8 ailes de poulets + 4 portions de frites + 4 jus de djara + 4 salades simples)
+
+## Files to create
+
+### `api/package.json`
+```json
+{
+  "name": "restaurant-api",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "seed": "node seed.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "mongoose": "^8.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
+```
+
+### `api/server.js`
+Complete Express server with:
+- MongoDB connection via MONGODB_URI env var (default: mongodb://localhost:27017/tchopetyamo)
+- CORS enabled
+- Routes: /api/menu, /api/orders, /api/customers
+- Error handling middleware
+- Listen on PORT env var (default 3001)
+
+### `api/models/MenuItem.js`
+Mongoose schema:
+- name: String required
+- category: String enum ['BEIGNETS','SALADES','BOISSON','POULETS','BURGER','MENUS_COMPOSES'] required
+- price: Number required
+- description: String
+- available: Boolean default true
+- timestamps: true
+
+### `api/models/Order.js`
+Mongoose schema:
+- customerName: String required
+- customerPhone: String
+- deliveryAddress: String
+- items: array of { menuItemId: ObjectId ref MenuItem, name: String, price: Number, quantity: Number }
+- totalAmount: Number required
+- status: String enum ['pending','confirmed','preparing','ready','delivered','cancelled'] default 'pending'
+- notes: String
+- timestamps: true
+
+### `api/routes/menu.js`
+- GET / - list all menu items (support ?category= filter, ?available=true)
+- GET /:id - get one
+- POST / - create
+- PUT /:id - update
+- DELETE /:id - delete
+
+### `api/routes/orders.js`
+- GET / - list all orders (support ?status= filter)
+- GET /:id - get one order (populate menu items)
+- POST / - create order (validate items, calculate total, embed name+price snapshot)
+- PUT /:id - update order (status, notes, deliveryAddress - cannot update if cancelled/delivered)
+- DELETE /:id - cancel order (set status to 'cancelled')
+
+### `api/seed.js`
+Seeds all the menu items from the data above into MongoDB. Connect to DB, clear MenuItem collection, insert all items, then disconnect.
+
+### `mcp-server/package.json`
+```json
+{
+  "name": "restaurant-mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": { "start": "node index.js" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.8.0",
+    "node-fetch": "^3.3.2"
+  }
+}
+```
+
+### `mcp-server/index.js`
+MCP server using stdio transport. Exposes these tools that call the CRUD API at API_URL (default http://localhost:3001):
+
+1. `get_menu` - Get menu items. Input: { category?: string, available?: boolean }
+2. `get_menu_item` - Get a single menu item by ID. Input: { id: string }
+3. `create_order` - Place a new order. Input: { customerName: string, customerPhone?: string, deliveryAddress?: string, items: Array<{menuItemId: string, quantity: number}>, notes?: string }
+4. `get_order` - Get order details by ID. Input: { orderId: string }
+5. `update_order` - Update order status or details. Input: { orderId: string, status?: string, notes?: string, deliveryAddress?: string }
+6. `cancel_order` - Cancel an order. Input: { orderId: string }
+7. `list_orders` - List orders with optional filter. Input: { customerPhone?: string, status?: string }
+
+Use `@modelcontextprotocol/sdk/server/index.js` Server class and `@modelcontextprotocol/sdk/server/stdio.js` StdioServerTransport.
+Use node-fetch for HTTP calls.
+
+### `agent/package.json`
+```json
+{
+  "name": "restaurant-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@modelcontextprotocol/sdk": "^1.8.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "uuid": "^9.0.0"
+  }
+}
+```
+
+### `agent/server.js`
+Express server on port 3000. This is the core AI agent:
+
+1. Import Anthropic SDK, MCP Client (StdioClientTransport)
+2. On startup: spawn the MCP server via StdioClientTransport, list all available tools, transform them to Anthropic tool format
+3. In-memory session store (Map): sessionId -> messages array
+4. System prompt: "You are a helpful AI assistant for Tchopetyamo restaurant, a Cameroonian restaurant. Help customers browse the menu, place orders, check order status, update or cancel orders. Always be friendly and helpful. When placing orders, always confirm the order details with the customer before creating it. The currency is XAF (Central African Franc). Ask for customer name and phone number when placing orders."
+5. Routes:
+   - POST /api/chat: { message, sessionId? } -> run agentic loop with MCP tools, return { response, sessionId }
+   - DELETE /api/chat/:sessionId: clear session
+   - GET /health: { status: 'ok' }
+6. Agentic loop:
+   - Add user message to session history
+   - Call Claude claude-opus-4-6 with tools + history
+   - If stop_reason is 'tool_use': extract tool_use blocks, call MCP tools, add tool_result blocks, call Claude again
+   - Repeat until stop_reason is 'end_turn'
+   - Return final text response
+7. Graceful error handling
+
+### `chat-ui/package.json`
+```json
+{
+  "name": "restaurant-chat-ui",
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.4.0",
+    "pinia": "^2.1.7",
+    "axios": "^1.6.7",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "vite": "^5.1.4"
+  }
+}
+```
+
+### `chat-ui/vite.config.js`
+Standard Vue 3 Vite config with proxy: /api -> http://localhost:3000
+
+### `chat-ui/index.html`
+Standard HTML with title "Tchopetyamo AI Assistant"
+
+### `chat-ui/src/main.js`
+Mount Vue app with Pinia
+
+### `chat-ui/src/stores/chat.js`
+Pinia store:
+- state: messages (array of {id, role, content, timestamp}), sessionId, isLoading, error
+- actions: sendMessage(content) -> POST /api/chat, clearConversation() -> DELETE /api/chat/:sessionId
+
+### `chat-ui/src/App.vue`
+Root component, renders ChatInterface
+
+### `chat-ui/src/components/ChatInterface.vue`
+Main chat UI that looks EXACTLY like Claude's interface:
+- Left sidebar (dark, ~260px): App title "Tchopetyamo AI" with restaurant icon, "New conversation" button, list of past messages as conversation starters
+- Main area: dark background (#1a1a2e or similar)
+- Chat messages area: scrollable, centered max-width 768px
+- Welcome screen when no messages: centered with restaurant logo/name, suggested prompts like "Show me the menu", "I want to place an order", "Check my order status", "What are the menu specials?"
+- Messages: user messages right-aligned with dark background, assistant messages left-aligned with bot avatar
+- Input area at bottom: textarea that grows, send button, similar to Claude
+
+**Styling (use inline styles or scoped CSS, NO external CSS frameworks):**
+- Dark theme: background #1e1e2e, sidebar #181825, text #cdd6f4
+- Accent color: dark red #8b1a1a (matching Tchopetyamo brand)
+- Message bubbles: user #313244, assistant transparent with avatar
+- Input: #313244 border, #cdd6f4 text
+- Very polished, pixel-perfect Claude-like layout
+- Smooth scrolling to bottom on new messages
+- Loading indicator (animated dots) when waiting for response
+- Auto-resize textarea
+- Send on Enter (Shift+Enter for newline)
+
+### `chat-ui/src/components/MessageBubble.vue`
+Individual message bubble with:
+- Bot avatar for assistant (use a simple SVG or emoji "🤖")
+- Formatted text (preserve newlines, handle markdown-like lists)
+- Timestamp
+
+### `.env.example` in agent/ folder
+```
+ANTHROPIC_API_KEY=your_api_key_here
+MCP_SERVER_PATH=../mcp-server/index.js
+API_URL=http://localhost:3001
+PORT=3000
+```
+
+### `api/.env.example`
+```
+MONGODB_URI=mongodb://localhost:27017/tchopetyamo
+PORT=3001
+```
+
+### Root `README.md`
+Full setup instructions explaining:
+1. Start MongoDB
+2. `cd api && npm install && npm run seed` (populate DB)
+3. `cd api && npm start` (port 3001)
+4. `cd mcp-server && npm install` 
+5. `cd agent && npm install`, set ANTHROPIC_API_KEY, `npm start` (port 3000)
+6. `cd chat-ui && npm install && npm run dev` (port 5173)
+
+## IMPORTANT NOTES:
+- Use CommonJS (`require`) for the api/ (no "type":"module")
+- Use ES modules (`import`) for mcp-server/ and agent/ (they have "type":"module")
+- The MCP server is spawned by the agent as a child process via StdioClientTransport - the agent passes `node index.js` command
+- Make the chat UI very polished - this is the most important part for the user experience
+- All API responses use { success: true/false, data: ..., message: ... } format
+- Include proper error handling everywhere
+
+Please create ALL files now using the Write tool. Do not skip any file.
