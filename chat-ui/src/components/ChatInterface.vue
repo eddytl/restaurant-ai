@@ -18,14 +18,23 @@
         <!-- Brand (expanded only) -->
         <div v-if="sidebarVisible" class="flex items-center gap-2.5 overflow-hidden">
           <div class="flex-shrink-0">
-            <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
               <circle cx="14" cy="14" r="14" fill="#8b1a1a"/>
-              <text x="14" y="19" text-anchor="middle" fill="white" font-size="14" font-weight="bold">T</text>
+              <!-- Plate -->
+              <ellipse cx="14" cy="17" rx="8" ry="3" fill="white" opacity="0.15"/>
+              <ellipse cx="14" cy="17" rx="8" ry="3" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
+              <!-- Food dome -->
+              <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="white" opacity="0.22"/>
+              <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
+              <!-- Steam lines -->
+              <path d="M11 8.5 Q10.5 7 11 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+              <path d="M14 8 Q13.5 6.5 14 5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+              <path d="M17 8.5 Q16.5 7 17 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
             </svg>
           </div>
           <div class="flex flex-col overflow-hidden">
             <span class="text-[15px] font-bold text-tc-text tracking-wide whitespace-nowrap">Restaurant</span>
-            <span class="text-[11px] text-tc-muted uppercase tracking-widest whitespace-nowrap">AI Assistant</span>
+            <span class="text-[11px] text-tc-muted uppercase tracking-widest whitespace-nowrap">{{ t.appSubtitle }}</span>
           </div>
         </div>
         <!-- Expand button (collapsed, desktop only) -->
@@ -60,12 +69,12 @@
           v-if="sidebarVisible"
           class="w-full px-3.5 py-2.5 bg-tc-surface border border-tc-border rounded-lg text-tc-text text-[13px] font-medium cursor-pointer flex items-center gap-2 hover:bg-tc-hover hover:border-tc-border-h transition-colors whitespace-nowrap"
           @click="startNewConversation"
-          title="New conversation"
+          :title="t.newConversation"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/>
           </svg>
-          New conversation
+          {{ t.newConversation }}
         </button>
         <button
           v-else
@@ -81,10 +90,10 @@
 
       <!-- Conversation list (expanded only) -->
       <div v-if="sidebarVisible" class="flex-1 overflow-y-auto py-2">
-        <div class="text-[11px] font-semibold text-tc-muted uppercase tracking-widest px-4 py-2 whitespace-nowrap">Recent</div>
+        <div class="text-[11px] font-semibold text-tc-muted uppercase tracking-widest px-4 py-2 whitespace-nowrap">{{ t.recent }}</div>
         <div class="flex flex-col gap-px">
           <div v-if="chatStore.conversationHistory.length === 0" class="px-4 py-3 text-[13px] text-tc-muted italic">
-            No conversations yet
+            {{ t.noConversations }}
           </div>
           <div
             v-for="conv in chatStore.conversationHistory"
@@ -132,7 +141,7 @@
           v-if="sidebarVisible"
           class="flex items-center gap-2 px-2.5 py-2 bg-transparent border border-tc-border rounded-lg text-tc-text-2 text-[13px] cursor-pointer w-full hover:bg-tc-surface hover:text-tc-text transition-colors whitespace-nowrap"
           @click="themeStore.toggle()"
-          :title="themeStore.isDark ? 'Light mode' : 'Dark mode'"
+          :title="themeStore.isDark ? t.lightMode : t.darkMode"
         >
           <svg v-if="themeStore.isDark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <circle cx="12" cy="12" r="5"/>
@@ -144,13 +153,13 @@
           <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
           </svg>
-          <span>{{ themeStore.isDark ? 'Light mode' : 'Dark mode' }}</span>
+          <span>{{ themeStore.isDark ? t.lightMode : t.darkMode }}</span>
         </button>
         <button
           v-else
           class="w-9 h-9 bg-transparent border-none text-tc-muted cursor-pointer flex items-center justify-center rounded-lg hover:bg-tc-surface hover:text-tc-text transition-colors"
           @click="themeStore.toggle()"
-          :title="themeStore.isDark ? 'Light mode' : 'Dark mode'"
+          :title="themeStore.isDark ? t.lightMode : t.darkMode"
         >
           <svg v-if="themeStore.isDark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <circle cx="12" cy="12" r="5"/>
@@ -162,6 +171,27 @@
           <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
           </svg>
+        </button>
+
+        <!-- Language toggle (expanded) -->
+        <button
+          v-if="sidebarVisible"
+          class="flex items-center gap-2 px-2.5 py-2 bg-transparent border border-tc-border rounded-lg text-tc-text-2 text-[13px] cursor-pointer w-full hover:bg-tc-surface hover:text-tc-text transition-colors whitespace-nowrap"
+          @click="langStore.toggle()"
+          :title="langStore.isFr ? 'Switch to English' : 'Passer en Français'"
+        >
+          <span class="text-base leading-none">{{ langStore.isFr ? '🇫🇷' : '🇬🇧' }}</span>
+          <span>{{ langStore.isFr ? 'Français' : 'English' }}</span>
+          <span class="ml-auto text-[11px] text-tc-muted font-semibold tracking-wide">{{ langStore.isFr ? 'EN →' : 'FR →' }}</span>
+        </button>
+        <!-- Language toggle (collapsed) -->
+        <button
+          v-else
+          class="w-9 h-9 bg-transparent border-none text-tc-muted cursor-pointer flex items-center justify-center rounded-lg hover:bg-tc-surface hover:text-tc-text transition-colors text-base"
+          @click="langStore.toggle()"
+          :title="langStore.isFr ? 'Switch to English' : 'Passer en Français'"
+        >
+          {{ langStore.isFr ? '🇫🇷' : '🇬🇧' }}
         </button>
 
       </div>
@@ -184,17 +214,33 @@
         <div v-if="!chatStore.hasMessages" class="flex items-center justify-center min-h-full p-10">
           <div class="max-w-[640px] w-full text-center">
             <div class="mb-6 flex justify-center">
-              <svg width="72" height="72" viewBox="0 0 72 72" fill="none" style="filter: drop-shadow(0 4px 24px var(--shadow-logo))">
+              <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 4px 24px var(--shadow-logo))">
+                <!-- Background circle -->
                 <circle cx="36" cy="36" r="36" fill="#8b1a1a"/>
-                <circle cx="36" cy="36" r="30" fill="#6b1414" opacity="0.5"/>
-                <text x="36" y="48" text-anchor="middle" fill="white" font-size="32" font-weight="bold" font-family="serif">T</text>
+                <circle cx="36" cy="36" r="30" fill="#6b1414" opacity="0.4"/>
+                <!-- Plate base -->
+                <ellipse cx="36" cy="46" rx="20" ry="5.5" fill="white" opacity="0.12"/>
+                <ellipse cx="36" cy="46" rx="20" ry="5.5" fill="none" stroke="white" stroke-width="1.8" opacity="0.85"/>
+                <!-- Plate rim highlight -->
+                <ellipse cx="36" cy="46" rx="16" ry="3.5" fill="none" stroke="white" stroke-width="1" opacity="0.3"/>
+                <!-- Food dome / cloche -->
+                <path d="M16 46 Q16 28 36 28 Q56 28 56 46" fill="white" opacity="0.14"/>
+                <path d="M16 46 Q16 28 36 28 Q56 28 56 46" fill="none" stroke="white" stroke-width="1.8" opacity="0.85"/>
+                <!-- Fork on left -->
+                <line x1="12" y1="24" x2="12" y2="38" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.75"/>
+                <line x1="10" y1="24" x2="10" y2="30" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+                <line x1="14" y1="24" x2="14" y2="30" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+                <!-- Knife on right -->
+                <line x1="60" y1="24" x2="60" y2="38" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.75"/>
+                <path d="M60 24 Q63 26 60 30" fill="white" opacity="0.55"/>
+                <!-- Steam -->
+                <path d="M29 24 Q27.5 20 29 16" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <path d="M36 23 Q34.5 19 36 15" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <path d="M43 24 Q41.5 20 43 16" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
               </svg>
             </div>
-            <h1 class="text-[28px] font-bold text-tc-text mb-3 tracking-tight">Bienvenue chez Restaurant</h1>
-            <p class="text-[15px] text-tc-text-2 leading-relaxed mb-9">
-              Your AI assistant for Restaurant restaurant.<br/>
-              Browse our menu, place orders, or check your order status.
-            </p>
+            <h1 class="text-[28px] font-bold text-tc-text mb-3 tracking-tight">{{ t.welcome }}</h1>
+            <p class="text-[15px] text-tc-text-2 leading-relaxed mb-9" style="white-space: pre-line">{{ t.welcomeSub }}</p>
             <div class="grid grid-cols-2 gap-2.5 md:grid-cols-2 sm:grid-cols-1">
               <button
                 v-for="s in suggestions" :key="s.text"
@@ -222,14 +268,8 @@
           <!-- Loading dots -->
           <div
             v-if="chatStore.isLoading && (!chatStore.streamingMessage || !chatStore.streamingMessage.content)"
-            class="flex items-start gap-3 px-6 max-w-[800px] mx-auto w-full"
+            class="flex items-start px-6 max-w-[800px] mx-auto w-full justify-start"
           >
-            <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center mt-0.5 bg-[#8b1a1a]">
-              <svg width="20" height="20" viewBox="0 0 28 28">
-                <circle cx="14" cy="14" r="14" fill="#8b1a1a"/>
-                <text x="14" y="19" text-anchor="middle" fill="white" font-size="12" font-weight="bold">Y</text>
-              </svg>
-            </div>
             <div class="flex gap-[5px] items-center p-3">
               <span class="w-2 h-2 bg-tc-muted rounded-full animate-bounce-dot" />
               <span class="w-2 h-2 bg-tc-muted rounded-full animate-bounce-dot [animation-delay:0.2s]" />
@@ -246,7 +286,7 @@
             <textarea
               ref="textareaRef"
               v-model="inputMessage"
-              placeholder="Message Yamo, your Restaurant AI assistant..."
+              :placeholder="t.placeholder"
               class="flex-1 bg-transparent border-none outline-none text-tc-text text-[14px] leading-relaxed resize-none min-h-6 max-h-[200px] placeholder:text-tc-faint disabled:opacity-60 disabled:cursor-not-allowed"
               :disabled="chatStore.isLoading"
               @keydown="handleKeydown"
@@ -267,10 +307,10 @@
             </button>
           </div>
           <div class="text-center text-[11px] text-tc-faint mt-2">
-            Press <kbd class="bg-tc-surface border border-tc-border rounded px-[5px] py-px text-[10px] text-tc-text-2">Enter</kbd>
-            to send,
-            <kbd class="bg-tc-surface border border-tc-border rounded px-[5px] py-px text-[10px] text-tc-text-2">Shift+Enter</kbd>
-            for new line
+            <kbd class="bg-tc-surface border border-tc-border rounded px-[5px] py-px text-[10px] text-tc-text-2">{{ t.enterToSend }}</kbd>
+            {{ t.toSend }}
+            <kbd class="bg-tc-surface border border-tc-border rounded px-[5px] py-px text-[10px] text-tc-text-2">{{ t.shiftEnter }}</kbd>
+            {{ t.forNewLine }}
           </div>
         </div>
       </div>
@@ -301,7 +341,7 @@
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
           </svg>
-          Rename
+          {{ t.rename }}
         </button>
         <div class="my-1" :style="{ height: '1px', background: 'var(--border)' }" />
         <button
@@ -317,7 +357,7 @@
             <path d="M10 11v6M14 11v6"/>
             <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
           </svg>
-          Delete
+          {{ t.delete }}
         </button>
       </div>
     </Teleport>
@@ -325,13 +365,16 @@
 </template>
 
 <script setup>
-import { ref, nextTick, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
 import { useChatStore } from '../stores/chat';
 import { useThemeStore } from '../stores/theme';
+import { useLanguageStore } from '../stores/language';
 import MessageBubble from './MessageBubble.vue';
 
 const chatStore = useChatStore();
 const themeStore = useThemeStore();
+const langStore = useLanguageStore();
+const t = computed(() => langStore.t);
 const messagesContainer = ref(null);
 const textareaRef = ref(null);
 const inputMessage = ref('');
@@ -392,14 +435,7 @@ async function deleteConversation(convId) {
   await chatStore.deleteConversation(convId);
 }
 
-const suggestions = [
-  { icon: '🍽️', text: 'Show me the full menu' },
-  { icon: '🛒', text: 'I want to place an order' },
-  { icon: '📦', text: 'Check my order status' },
-  { icon: '🔥', text: 'What are the menu specials?' },
-  { icon: '🍗', text: 'Show me the chicken dishes' },
-  { icon: '🥗', text: 'What salads do you have?' }
-];
+const suggestions = computed(() => t.value.suggestions);
 
 function sendSuggestion(text) { inputMessage.value = text; sendMessage(); }
 
@@ -408,7 +444,7 @@ async function sendMessage() {
   if (!msg || chatStore.isLoading) return;
   inputMessage.value = '';
   await nextTick(); resetTextarea();
-  await chatStore.sendMessage(msg);
+  await chatStore.sendMessage(msg, langStore.lang);
 }
 
 function handleKeydown(e) {

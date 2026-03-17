@@ -49,7 +49,7 @@ export const useChatStore = defineStore('chat', {
       } catch {}
     },
 
-    async sendMessage(content) {
+    async sendMessage(content, language = 'fr') {
       if (!content.trim() || this.isLoading) return;
 
       this.error = null;
@@ -76,7 +76,7 @@ export const useChatStore = defineStore('chat', {
         const response = await fetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: trimmedContent, sessionId: this.sessionId })
+          body: JSON.stringify({ message: trimmedContent, sessionId: this.sessionId, language })
         });
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);

@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3000;
 const MCP_SERVER_PATH = process.env.MCP_SERVER_PATH || path.join(__dirname, '../mcp-server/index.js');
 const API_URL = process.env.API_URL || 'http://localhost:3001';
 
-const SYSTEM_PROMPT = `You are a helpful AI assistant for Restaurant restaurant, a wonderful Cameroonian restaurant. Your name is Yamo.
+const BASE_SYSTEM_PROMPT = `You are a helpful AI assistant for Restaurant, a wonderful Cameroonian restaurant. Your name is Yamo.
 
 Your role is to help customers:
 - Browse and explore the menu (categories: Beignets, Salades, Boisson, Poulets, Burger, Menus Composés)
@@ -35,8 +35,15 @@ Guidelines:
 - Be concise but informative
 - If you need to look up menu items to place an order, use the get_menu tool first to find item IDs
 - Always provide order IDs to customers so they can track their orders
+- When listing menu items, if an item has an imageUrl field, display the image using markdown syntax: ![item name](imageUrl). Always show the image before the item description.
 
 You represent the warmth and hospitality of Cameroonian culture. Bienvenue chez Restaurant!`;
+
+function getSystemPrompt(language) {
+  const defaultLang = language === 'en' ? 'English' : 'French';
+  const langInstruction = `\n\nLANGUAGE RULE: The user's preferred language is ${defaultLang}. Always respond in the same language the user writes in. If the user writes in French, respond in French. If the user writes in English, respond in English. If the user writes in another language, respond in that language. When the user's message is ambiguous or very short (e.g. "ok", "yes"), default to ${defaultLang}.`;
+  return BASE_SYSTEM_PROMPT + langInstruction;
+}
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -129,13 +136,24 @@ async function callMCPTool(name, input) {
 
 // ─── Error helper ───────────────────────────────────────────────────────────
 
-function friendlyError(err) {
+function friendlyError(err, language = 'fr') {
   const status = err.status || err.statusCode;
-  if (status === 429) return "I'm a little overwhelmed right now — please wait a few seconds and try again! 🙏";
-  if (status === 401 || status === 403) return "I'm having an authentication issue. Please contact the restaurant staff.";
-  if (status >= 500) return "I'm having trouble reaching my brain right now. Please try again in a moment.";
-  if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') return "I can't reach the restaurant system. Please try again shortly.";
-  return "Something went wrong on my end. Please try again! 😊";
+  const isFr = language !== 'en';
+  if (status === 429) return isFr
+    ? "Je suis un peu débordé en ce moment — veuillez patienter quelques secondes et réessayer ! 🙏"
+    : "I'm a little overwhelmed right now — please wait a few seconds and try again! 🙏";
+  if (status === 401 || status === 403) return isFr
+    ? "J'ai un problème d'authentification. Veuillez contacter le personnel du restaurant."
+    : "I'm having an authentication issue. Please contact the restaurant staff.";
+  if (status >= 500) return isFr
+    ? "J'ai du mal à joindre mon système en ce moment. Veuillez réessayer dans un instant."
+    : "I'm having trouble reaching my brain right now. Please try again in a moment.";
+  if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') return isFr
+    ? "Je n'arrive pas à joindre le système du restaurant. Veuillez réessayer dans un moment."
+    : "I can't reach the restaurant system. Please try again shortly.";
+  return isFr
+    ? "Une erreur s'est produite de mon côté. Veuillez réessayer ! 😊"
+    : "Something went wrong on my end. Please try again! 😊";
 }
 
 // ─── Express app ────────────────────────────────────────────────────────────
@@ -164,7 +182,7 @@ app.post('/api/chat/stream', async (req, res) => {
   const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
   try {
-    const { message, sessionId: existingId } = req.body;
+    const { message, sessionId: existingId, language = 'fr' } = req.body;
     if (!message?.trim()) { send({ type: 'error', message: 'Message is required' }); return res.end(); }
 
     // Load or create session
@@ -192,7 +210,7 @@ app.post('/api/chat/stream', async (req, res) => {
       const stream = anthropic.messages.stream({
         model: 'claude-opus-4-5',
         max_tokens: 4096,
-        system: SYSTEM_PROMPT,
+        system: getSystemPrompt(language),
         messages: session.messages,
         ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {})
       });
@@ -236,7 +254,7 @@ app.post('/api/chat/stream', async (req, res) => {
     res.end();
   } catch (err) {
     console.error('Stream error:', err.status || '', err.message);
-    try { send({ type: 'error', message: friendlyError(err) }); } catch {}
+    try { send({ type: 'error', message: friendlyError(err, language) }); } catch {}
     res.end();
   }
 });
@@ -245,7 +263,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, sessionId: existingId } = req.body;
+    const { message, sessionId: existingId, language = 'fr' } = req.body;
     if (!message?.trim()) return res.status(400).json({ success: false, message: 'Message is required' });
 
     let sessionId = existingId;
@@ -263,7 +281,7 @@ app.post('/api/chat', async (req, res) => {
     let response, iterations = 0;
     while (iterations++ < 10) {
       response = await anthropic.messages.create({
-        model: 'claude-opus-4-5', max_tokens: 4096, system: SYSTEM_PROMPT,
+        model: 'claude-opus-4-5', max_tokens: 4096, system: getSystemPrompt(language),
         messages: session.messages,
         ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {})
       });
@@ -292,7 +310,7 @@ app.post('/api/chat', async (req, res) => {
     res.json({ success: true, data: { response: finalText, sessionId } });
   } catch (err) {
     console.error('Chat error:', err.status || '', err.message);
-    res.status(500).json({ success: false, message: friendlyError(err) });
+    res.status(500).json({ success: false, message: friendlyError(err, language) });
   }
 });
 

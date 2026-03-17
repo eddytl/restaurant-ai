@@ -1,21 +1,10 @@
 <template>
   <div
-    class="flex items-start gap-2.5 px-6 max-w-[800px] mx-auto w-full py-1.5"
-    :class="message.role === 'user' ? 'flex-row-reverse' : 'flex-row'"
+    class="flex items-start px-6 max-w-[800px] mx-auto w-full py-1.5"
+    :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
   >
-    <!-- Assistant avatar -->
-    <div
-      v-if="message.role === 'assistant'"
-      class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center mt-1 bg-tc-accent shadow-[0_2px_8px_var(--shadow-accent)]"
-    >
-      <svg width="20" height="20" viewBox="0 0 28 28" fill="none">
-        <circle cx="14" cy="14" r="14" fill="#8b1a1a"/>
-        <text x="14" y="19" text-anchor="middle" fill="white" font-size="13" font-weight="bold" font-family="serif">Y</text>
-      </svg>
-    </div>
-
     <!-- Message content -->
-    <div class="flex flex-col max-w-[calc(100%-88px)]" :class="message.role === 'user' ? 'items-end' : 'items-start'">
+    <div class="flex flex-col max-w-[75%]" :class="message.role === 'user' ? 'items-end' : 'items-start'">
       <div
         class="px-3.5 py-2.5 rounded-[14px] text-[14px] leading-[1.65] break-words"
         :class="[
@@ -35,16 +24,6 @@
       </div>
     </div>
 
-    <!-- User avatar -->
-    <div
-      v-if="message.role === 'user'"
-      class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center mt-1 bg-tc-surface border border-tc-border-h"
-    >
-      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-        <circle cx="9" cy="6" r="4" fill="var(--text-secondary)"/>
-        <path d="M1 17c0-4.418 3.582-8 8-8s8 3.582 8 8" stroke="var(--text-secondary)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
-      </svg>
-    </div>
   </div>
 </template>
 
@@ -83,6 +62,13 @@ function parseMarkdown(raw) {
 
   // Escape HTML
   text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // Images (before inline formatting to avoid escaping the URL)
+  text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+    const safeAlt = alt.replace(/"/g, '&quot;');
+    const safeUrl = url.trim();
+    return `<img class="md-img" src="${safeUrl}" alt="${safeAlt}" loading="lazy" />`;
+  });
 
   // Inline formatting
   text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
@@ -204,5 +190,10 @@ function parseMarkdown(raw) {
 }
 .bubble-text :deep(.md-table tbody tr:hover td) {
   @apply bg-tc-table-hover text-tc-text;
+}
+.bubble-text :deep(.md-img) {
+  @apply rounded-xl my-2 max-w-full object-cover;
+  max-height: 220px;
+  display: block;
 }
 </style>

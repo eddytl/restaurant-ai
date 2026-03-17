@@ -3,12 +3,12 @@ version: '3.8'
 services:
   mongodb:
     image: mongo:7
-    container_name: tchopetyamo-mongodb
+    container_name: restaurant-mongodb
     restart: unless-stopped
     volumes:
       - mongodb_data:/data/db
     networks:
-      - tchopetyamo-net
+      - restaurant-net
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -20,18 +20,20 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
-    container_name: tchopetyamo-api
+    container_name: restaurant-api
     restart: unless-stopped
     ports:
       - "3001:3001"
     environment:
-      - MONGODB_URI=mongodb://mongodb:27017/tchopetyamo
+      - MONGODB_URI=mongodb://mongodb:27017/restaurant
       - PORT=3001
+    volumes:
+      - menu_images:/app/uploads
     depends_on:
       mongodb:
         condition: service_healthy
     networks:
-      - tchopetyamo-net
+      - restaurant-net
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
       interval: 10s
@@ -43,7 +45,7 @@ services:
     build:
       context: .
       dockerfile: agent/Dockerfile
-    container_name: tchopetyamo-agent
+    container_name: restaurant-agent
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -56,7 +58,7 @@ services:
       api:
         condition: service_healthy
     networks:
-      - tchopetyamo-net
+      - restaurant-net
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 10s
@@ -68,7 +70,7 @@ services:
     build:
       context: ./chat-ui
       dockerfile: Dockerfile
-    container_name: tchopetyamo-chat-ui
+    container_name: restaurant-chat-ui
     restart: unless-stopped
     ports:
       - "8080:80"
@@ -76,11 +78,12 @@ services:
       agent:
         condition: service_healthy
     networks:
-      - tchopetyamo-net
+      - restaurant-net
 
 volumes:
   mongodb_data:
+  menu_images:
 
 networks:
-  tchopetyamo-net:
+  restaurant-net:
     driver: bridge

@@ -28,6 +28,10 @@ const menuItemSchema = new mongoose.Schema(
     available: {
       type: Boolean,
       default: true
+    },
+    imageUrl: {
+      type: String,
+      default: null
     }
   },
   {

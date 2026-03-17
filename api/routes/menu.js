@@ -1,6 +1,29 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const MenuItem = require('../models/MenuItem');
+
+const UPLOADS_DIR = path.join(__dirname, '../uploads');
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `menu-${req.params.id}-${Date.now()}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(allowed.includes(ext) ? null : new Error('Only JPG, PNG and WebP images are allowed'), allowed.includes(ext));
+  }
+});
 
 // GET /api/menu - List all menu items with optional filters
 router.get('/', async (req, res, next) => {
@@ -97,6 +120,50 @@ router.put('/:id', async (req, res, next) => {
       const messages = Object.values(err.errors).map((e) => e.message);
       return res.status(400).json({ success: false, message: messages.join(', ') });
     }
+    next(err);
+  }
+});
+
+// POST /api/menu/:id/image - Upload image for a menu item
+router.post('/:id/image', upload.single('image'), async (req, res, next) => {
+  try {
+    const item = await MenuItem.findById(req.params.id);
+    if (!item) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(404).json({ success: false, message: 'Menu item not found' });
+    }
+
+    // Delete old image if exists
+    if (item.imageUrl) {
+      const oldPath = path.join(UPLOADS_DIR, path.basename(item.imageUrl));
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+
+    item.imageUrl = `/uploads/${req.file.filename}`;
+    await item.save();
+
+    res.json({ success: true, data: item, message: 'Image uploaded successfully' });
+  } catch (err) {
+    if (req.file) fs.unlinkSync(req.file.path);
+    next(err);
+  }
+});
+
+// DELETE /api/menu/:id/image - Remove image from a menu item
+router.delete('/:id/image', async (req, res, next) => {
+  try {
+    const item = await MenuItem.findById(req.params.id);
+    if (!item) return res.status(404).json({ success: false, message: 'Menu item not found' });
+
+    if (item.imageUrl) {
+      const imgPath = path.join(UPLOADS_DIR, path.basename(item.imageUrl));
+      if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+      item.imageUrl = null;
+      await item.save();
+    }
+
+    res.json({ success: true, data: item, message: 'Image removed' });
+  } catch (err) {
     next(err);
   }
 });
