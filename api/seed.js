@@ -2,7 +2,7 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const MenuItem = require('./models/MenuItem');
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/tchopetyamo';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/restaurant';
 
 const menuItems = [
   // BEIGNETS
@@ -172,9 +172,11 @@ async function seed() {
     await mongoose.connect(MONGODB_URI);
     console.log('Connected to MongoDB.');
 
-    console.log('Clearing existing menu items...');
-    await MenuItem.deleteMany({});
-    console.log('Existing menu items cleared.');
+    const existing = await MenuItem.countDocuments();
+    if (existing > 0) {
+      console.log(`Database already has ${existing} menu items — skipping seed.`);
+      return;
+    }
 
     console.log(`Inserting ${menuItems.length} menu items...`);
     const inserted = await MenuItem.insertMany(menuItems);

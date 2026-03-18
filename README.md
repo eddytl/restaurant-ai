@@ -1,6 +1,6 @@
-# Tchopetyamo Restaurant AI Agent
+# Restaurant AI Agent
 
-A complete AI-powered restaurant assistant for **Tchopetyamo**, a Cameroonian restaurant. Customers can browse the menu, place orders, check order status, and manage their orders via a beautiful Claude-like chat interface.
+A complete AI-powered restaurant assistant, a Cameroonian restaurant. Customers can browse the menu, place orders, check order status, and manage their orders via a beautiful Claude-like chat interface.
 
 ## Architecture
 
@@ -280,7 +280,7 @@ concurrently \
 
 **api/.env**
 ```
-MONGODB_URI=mongodb://localhost:27017/tchopetyamo
+MONGODB_URI=mongodb://localhost:27017/restaurant
 PORT=3001
 ```
 
