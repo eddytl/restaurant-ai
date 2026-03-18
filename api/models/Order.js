@@ -26,15 +26,10 @@ const orderItemSchema = new mongoose.Schema(
 
 const orderSchema = new mongoose.Schema(
   {
-    customerName: {
-      type: String,
-      required: [true, 'Customer name is required'],
-      trim: true
-    },
-    customerPhone: {
-      type: String,
-      trim: true,
-      default: ''
+    customer: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Customer',
+      required: [true, 'Customer is required']
     },
     deliveryAddress: {
       type: String,
@@ -74,7 +69,7 @@ const orderSchema = new mongoose.Schema(
 
 // Indexes
 orderSchema.index({ status: 1 });
-orderSchema.index({ customerPhone: 1 });
+orderSchema.index({ customer: 1 });
 orderSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Order', orderSchema);

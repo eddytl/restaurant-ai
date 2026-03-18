@@ -4,7 +4,12 @@
     :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
   >
     <!-- Message content -->
-    <div class="flex flex-col max-w-[75%]" :class="message.role === 'user' ? 'items-end' : 'items-start'">
+    <div
+      class="flex flex-col"
+      :class="[
+        message.role === 'user' ? 'items-end max-w-[75%]' : 'items-start max-w-[90%]'
+      ]"
+    >
       <div
         class="px-3.5 py-2.5 rounded-[14px] text-[14px] leading-[1.65] break-words"
         :class="[
@@ -80,10 +85,11 @@ function parseMarkdown(raw) {
   const lines = text.split('\n');
   const processed = [];
   let inList = false, inOrderedList = false;
-  let listItems = [], tableLines = [];
+  let listItems = [], tableLines = [], cardBuffer = [];
 
   const isTableRow = (l) => /^\s*\|.+\|\s*$/.test(l);
   const isSeparatorRow = (l) => /^\s*\|[\s\-:|]+\|\s*$/.test(l);
+  const isImgLine = (l) => /<img[^>]+class="md-img"/.test(l);
 
   function flushList() {
     if (inList && listItems.length) {
@@ -94,6 +100,25 @@ function parseMarkdown(raw) {
       processed.push('<ol>' + listItems.map(i => `<li>${i}</li>`).join('') + '</ol>');
       listItems = []; inOrderedList = false;
     }
+  }
+
+  function formatCardInfo(desc, extra) {
+    const priceMatch = desc.match(/(.+?)\s*[—–-]+\s*([0-9][0-9\s,.]*\s*XAF.*)$/i);
+    if (priceMatch) {
+      const name = priceMatch[1].replace(/<\/?strong>/g, '').trim();
+      const price = priceMatch[2].trim();
+      return `<div class="menu-card-info"><strong>${name}</strong>${extra ? `<span class="card-desc">${extra}</span>` : ''}<span class="card-price">${price}</span></div>`;
+    }
+    return `<div class="menu-card-info"><strong>${desc}</strong>${extra ? `<span class="card-desc">${extra}</span>` : ''}</div>`;
+  }
+
+  function flushCards() {
+    if (!cardBuffer.length) return;
+    const cards = cardBuffer.map(({ img, desc, extra }) =>
+      `<div class="menu-card">${img}${desc ? formatCardInfo(desc, extra) : ''}</div>`
+    ).join('');
+    processed.push(`<div class="menu-card-grid">${cards}</div>`);
+    cardBuffer = [];
   }
 
   function parseRow(line) { return line.split('|').slice(1, -1).map(c => c.trim()); }
@@ -127,29 +152,50 @@ function parseMarkdown(raw) {
     tableLines = [];
   }
 
-  for (const line of lines) {
-    if (isTableRow(line)) { flushList(); tableLines.push(line); continue; }
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (isTableRow(line)) { flushList(); flushCards(); tableLines.push(line); i++; continue; }
     else if (tableLines.length) flushTable();
 
-    if (line.match(/^### (.+)/)) { flushList(); processed.push(`<h3 class="md-h3">${line.replace(/^### /, '')}</h3>`); continue; }
-    if (line.match(/^## (.+)/))  { flushList(); processed.push(`<h2 class="md-h2">${line.replace(/^## /, '')}</h2>`); continue; }
-    if (line.match(/^# (.+)/))   { flushList(); processed.push(`<h1 class="md-h1">${line.replace(/^# /, '')}</h1>`); continue; }
-    if (line.match(/^&gt;\s+(.+)/)) { flushList(); processed.push(`<blockquote class="md-blockquote">${line.replace(/^&gt;\s+/, '')}</blockquote>`); continue; }
+    // Menu card: image line, optional name/price line, optional description line
+    if (isImgLine(line)) {
+      flushList();
+      const next = lines[i + 1] ?? '';
+      const afterNext = lines[i + 2] ?? '';
+      const hasDesc = next.trim() !== '' && !isImgLine(next);
+      // Capture a third line as extra only if it's plain text (not a heading, not an image)
+      const hasExtra = hasDesc && afterNext.trim() !== '' && !isImgLine(afterNext) && !afterNext.match(/^#{1,3} /);
+      cardBuffer.push({ img: line, desc: hasDesc ? next : '', extra: hasExtra ? afterNext : '' });
+      i += hasExtra ? 3 : (hasDesc ? 2 : 1);
+      continue;
+    }
+
+    // Any non-card, non-blank line flushes the card buffer
+    if (cardBuffer.length && line.trim() !== '') flushCards();
+
+    if (line.match(/^### (.+)/)) { flushList(); processed.push(`<h3 class="md-h3">${line.replace(/^### /, '')}</h3>`); i++; continue; }
+    if (line.match(/^## (.+)/))  { flushList(); processed.push(`<h2 class="md-h2">${line.replace(/^## /, '')}</h2>`); i++; continue; }
+    if (line.match(/^# (.+)/))   { flushList(); processed.push(`<h1 class="md-h1">${line.replace(/^# /, '')}</h1>`); i++; continue; }
+    if (line.match(/^&gt;\s+(.+)/)) { flushList(); processed.push(`<blockquote class="md-blockquote">${line.replace(/^&gt;\s+/, '')}</blockquote>`); i++; continue; }
 
     const uMatch = line.match(/^[-*•]\s+(.+)/);
-    if (uMatch) { if (inOrderedList) flushList(); inList = true; listItems.push(uMatch[1]); continue; }
+    if (uMatch) { if (inOrderedList) flushList(); inList = true; listItems.push(uMatch[1]); i++; continue; }
 
     const oMatch = line.match(/^\d+\.\s+(.+)/);
-    if (oMatch) { if (inList) flushList(); inOrderedList = true; listItems.push(oMatch[1]); continue; }
+    if (oMatch) { if (inList) flushList(); inOrderedList = true; listItems.push(oMatch[1]); i++; continue; }
 
-    if (line.match(/^---+$/) || line.match(/^\*\*\*+$/)) { flushList(); processed.push('<hr class="md-hr"/>'); continue; }
-    if (line.trim() === '') { flushList(); processed.push('<div class="line-break"></div>'); continue; }
+    if (line.match(/^---+$/) || line.match(/^\*\*\*+$/)) { flushList(); processed.push('<hr class="md-hr"/>'); i++; continue; }
+    if (line.trim() === '') { flushList(); processed.push('<div class="line-break"></div>'); i++; continue; }
 
     flushList();
     processed.push(`<p class="md-p">${line}</p>`);
+    i++;
   }
 
   flushList();
+  flushCards();
   if (tableLines.length) flushTable();
   return processed.join('');
 }
@@ -195,5 +241,43 @@ function parseMarkdown(raw) {
   @apply rounded-xl my-2 max-w-full object-cover;
   max-height: 220px;
   display: block;
+}
+
+/* Menu card grid */
+.bubble-text :deep(.menu-card-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+  gap: 10px;
+  margin: 10px 0;
+}
+.bubble-text :deep(.menu-card) {
+  @apply rounded-2xl border border-tc-border overflow-hidden bg-tc-surface;
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 0.15s;
+}
+.bubble-text :deep(.menu-card:hover) {
+  @apply shadow-md border-tc-accent;
+}
+.bubble-text :deep(.menu-card .md-img) {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 0;
+  margin: 0;
+  max-height: none;
+  display: block;
+}
+.bubble-text :deep(.menu-card-info) {
+  @apply px-3 py-2 flex flex-col gap-0.5;
+}
+.bubble-text :deep(.menu-card-info strong) {
+  @apply text-[13px] font-semibold text-tc-text leading-tight;
+}
+.bubble-text :deep(.menu-card-info .card-price) {
+  @apply text-[12px] font-semibold text-tc-accent;
+}
+.bubble-text :deep(.menu-card-info .card-desc) {
+  @apply text-[11px] text-tc-muted leading-snug;
 }
 </style>

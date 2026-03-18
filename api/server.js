@@ -8,6 +8,8 @@ const fs = require('fs');
 const menuRoutes = require('./routes/menu');
 const orderRoutes = require('./routes/orders');
 const conversationRoutes = require('./routes/conversations');
+const customerRoutes = require('./routes/customers');
+const categoryRoutes = require('./routes/categories');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -35,6 +37,8 @@ app.use((req, res, next) => {
 app.use('/api/menu', menuRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/conversations', conversationRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/categories', categoryRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

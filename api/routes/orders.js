@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
 const MenuItem = require('../models/MenuItem');
+const Customer = require('../models/Customer');
 
 const TERMINAL_STATUSES = ['cancelled', 'delivered'];
 
@@ -15,10 +16,12 @@ router.get('/', async (req, res, next) => {
     }
 
     if (req.query.customerPhone) {
-      query.customerPhone = req.query.customerPhone;
+      const customer = await Customer.findOne({ phone: req.query.customerPhone });
+      if (!customer) return res.json({ success: true, data: [], message: 'Found 0 order(s)' });
+      query.customer = customer._id;
     }
 
-    const orders = await Order.find(query).sort({ createdAt: -1 });
+    const orders = await Order.find(query).populate('customer').sort({ createdAt: -1 });
 
     res.json({
       success: true,
@@ -33,7 +36,9 @@ router.get('/', async (req, res, next) => {
 // GET /api/orders/:id - Get a single order (populated)
 router.get('/:id', async (req, res, next) => {
   try {
-    const order = await Order.findById(req.params.id).populate('items.menuItemId', 'name category price available');
+    const order = await Order.findById(req.params.id)
+      .populate('customer')
+      .populate('items.menuItemId', 'name category price available');
 
     if (!order) {
       return res.status(404).json({
@@ -60,7 +65,12 @@ router.post('/', async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Customer name is required' });
     }
 
+    if (!customerPhone) {
+      return res.status(400).json({ success: false, message: 'Customer phone is required' });
+    }
+
     if (!items || !Array.isArray(items) || items.length === 0) {
+
       return res.status(400).json({ success: false, message: 'Order must include at least one item' });
     }
 
@@ -101,9 +111,18 @@ router.post('/', async (req, res, next) => {
       totalAmount += menuItem.price * qty;
     }
 
+    // Upsert customer first to get the reference
+    const customer = await Customer.findOneAndUpdate(
+      { phone: customerPhone },
+      {
+        $set: { name: customerName, lastOrderAt: new Date() },
+        $inc: { totalOrders: 1, totalSpent: totalAmount }
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
     const order = new Order({
-      customerName,
-      customerPhone: customerPhone || '',
+      customer: customer._id,
       deliveryAddress: deliveryAddress || '',
       items: resolvedItems,
       totalAmount,
@@ -112,6 +131,8 @@ router.post('/', async (req, res, next) => {
     });
 
     await order.save();
+
+    await Customer.findByIdAndUpdate(customer._id, { $push: { orders: order._id } });
 
     res.status(201).json({
       success: true,

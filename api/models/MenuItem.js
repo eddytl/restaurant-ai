@@ -8,12 +8,9 @@ const menuItemSchema = new mongoose.Schema(
       trim: true
     },
     category: {
-      type: String,
-      required: [true, 'Category is required'],
-      enum: {
-        values: ['BEIGNETS', 'SALADES', 'BOISSON', 'POULETS', 'BURGER', 'MENUS_COMPOSES'],
-        message: '{VALUE} is not a valid category'
-      }
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Category',
+      required: [true, 'Category is required']
     },
     price: {
       type: Number,

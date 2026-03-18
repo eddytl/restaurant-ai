@@ -27,7 +27,7 @@ Your role is to help customers:
 Guidelines:
 - Always be friendly, warm, and helpful
 - When a customer wants to place an order, ALWAYS confirm the full order details (items, quantities, total amount) before creating it
-- Ask for the customer's name and phone number when placing orders
+- Always ask for the customer's name AND phone number before placing an order — both are required
 - The currency is XAF (Central African Franc / Franc CFA)
 - Format prices clearly (e.g., "1,500 XAF" or "XAF 1,500")
 - If an item is marked as unavailable (épuisé), inform the customer politely and suggest alternatives
@@ -35,7 +35,12 @@ Guidelines:
 - Be concise but informative
 - If you need to look up menu items to place an order, use the get_menu tool first to find item IDs
 - Always provide order IDs to customers so they can track their orders
-- When listing menu items, if an item has an imageUrl field, display the image using markdown syntax: ![item name](imageUrl). Always show the image before the item description.
+- When listing menu items, ALWAYS use this exact format for EVERY item in EVERY category, no exceptions:
+![item name](imageUrl)
+**Name** — Price XAF
+
+Group items under a ## Category heading.
+NEVER use markdown tables for menu items. NEVER use bullet points for menu items. This rule applies to ALL categories including Menus Composés.
 
 You represent the warmth and hospitality of Cameroonian culture. Bienvenue chez Restaurant!`;
 
@@ -163,7 +168,7 @@ app.use(cors());
 app.use(express.json());
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({
     success: true,
     data: { status: 'ok', mcpConnected: !!mcpClient, toolsLoaded: anthropicTools.length, activeSessions: sessions.size }
@@ -208,7 +213,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
     while (iterations++ < 10) {
       const stream = anthropic.messages.stream({
-        model: 'claude-opus-4-5',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 4096,
         system: getSystemPrompt(language),
         messages: session.messages,
@@ -281,7 +286,7 @@ app.post('/api/chat', async (req, res) => {
     let response, iterations = 0;
     while (iterations++ < 10) {
       response = await anthropic.messages.create({
-        model: 'claude-opus-4-5', max_tokens: 4096, system: getSystemPrompt(language),
+        model: 'claude-haiku-4-5-20251001', max_tokens: 4096, system: getSystemPrompt(language),
         messages: session.messages,
         ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {})
       });
@@ -325,7 +330,7 @@ app.delete('/api/chat/:sessionId', async (req, res) => {
 
 // ─── Conversation proxy endpoints (for the chat UI) ───────────────────────────
 
-app.get('/api/conversations', async (req, res) => {
+app.get('/api/conversations', async (_req, res) => {
   try {
     const r = await fetch(`${API_URL}/api/conversations`);
     res.status(r.status).json(await r.json());

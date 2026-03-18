@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const MenuItem = require('../models/MenuItem');
+const Category = require('../models/Category');
 
 const UPLOADS_DIR = path.join(__dirname, '../uploads');
 
@@ -31,14 +32,16 @@ router.get('/', async (req, res, next) => {
     const query = {};
 
     if (req.query.category) {
-      query.category = req.query.category.toUpperCase();
+      const cat = await Category.findOne({ name: req.query.category.toUpperCase() });
+      if (!cat) return res.json({ success: true, data: [], message: 'Found 0 menu item(s)' });
+      query.category = cat._id;
     }
 
     if (req.query.available !== undefined) {
       query.available = req.query.available === 'true';
     }
 
-    const items = await MenuItem.find(query).sort({ category: 1, name: 1 });
+    const items = await MenuItem.find(query).populate('category', 'name').sort({ name: 1 });
 
     res.json({
       success: true,
@@ -53,7 +56,7 @@ router.get('/', async (req, res, next) => {
 // GET /api/menu/:id - Get a single menu item
 router.get('/:id', async (req, res, next) => {
   try {
-    const item = await MenuItem.findById(req.params.id);
+    const item = await MenuItem.findById(req.params.id).populate('category', 'name');
 
     if (!item) {
       return res.status(404).json({
