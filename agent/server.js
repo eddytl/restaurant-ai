@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import Anthropic from '@anthropic-ai/sdk';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -59,7 +60,22 @@ function getSystemPrompt(language, customerProfile = null) {
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // In-memory session cache: sessionId -> { messages, uiMessages, title, createdAt }
+// LRU-lite: evict the oldest entry when the Map exceeds MAX_SESSIONS
+const MAX_SESSIONS = 500;
 const sessions = new Map();
+
+function evictOldestSession() {
+  if (sessions.size >= MAX_SESSIONS) {
+    const oldestKey = sessions.keys().next().value;
+    sessions.delete(oldestKey);
+  }
+}
+
+function sessionSet(id, session) {
+  sessions.delete(id); // move to end (most-recently-used)
+  evictOldestSession();
+  sessions.set(id, session);
+}
 
 let mcpClient = null;
 let anthropicTools = [];
@@ -99,7 +115,7 @@ async function loadSession(sessionId) {
           title: data.title,
           createdAt: new Date(data.createdAt)
         };
-        sessions.set(sessionId, session);
+        sessionSet(sessionId, session);
         console.log(`[Session] Loaded ${sessionId} from DB (${session.messages.length} msgs)`);
         return session;
       }
@@ -155,9 +171,27 @@ async function initMCP() {
   }
 }
 
+const MCP_TIMEOUT_MS = 10_000;
+const MCP_MAX_RETRIES = 2;
+
 async function callMCPTool(name, input) {
   if (!mcpClient) throw new Error('MCP client not initialized');
-  return mcpClient.callTool({ name, arguments: input });
+
+  for (let attempt = 0; attempt <= MCP_MAX_RETRIES; attempt++) {
+    try {
+      const result = await Promise.race([
+        mcpClient.callTool({ name, arguments: input }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`MCP tool "${name}" timed out after ${MCP_TIMEOUT_MS}ms`)), MCP_TIMEOUT_MS)
+        )
+      ]);
+      return result;
+    } catch (err) {
+      if (attempt === MCP_MAX_RETRIES) throw err;
+      // Exponential backoff: 200ms, 400ms
+      await new Promise(r => setTimeout(r, 200 * Math.pow(2, attempt)));
+    }
+  }
 }
 
 // Post-process get_menu tool result:
@@ -266,8 +300,30 @@ function friendlyError(err, language = 'fr') {
 // ─── Express app ────────────────────────────────────────────────────────────
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+// CORS — restrict to configured origins (default: localhost dev)
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['http://localhost:5173', 'http://localhost:3000'];
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow requests with no origin (curl, Postman, same-origin)
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    cb(new Error(`CORS: origin ${origin} not allowed`));
+  }
+}));
+
+// Rate limiting — 60 requests/minute per IP on chat endpoint
+const chatLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many requests, please slow down.' }
+});
+app.use('/api/chat', chatLimiter);
+
+app.use(express.json({ limit: '64kb' }));
 
 // Health check
 app.get('/health', (_req, res) => {
@@ -291,6 +347,7 @@ app.post('/api/chat/stream', async (req, res) => {
   try {
     const { message, sessionId: existingId, language = 'fr', customerProfile = null } = req.body;
     if (!message?.trim()) { send({ type: 'error', message: 'Message is required' }); return res.end(); }
+    if (message.length > 2000) { send({ type: 'error', message: 'Message too long (max 2000 characters).' }); return res.end(); }
 
     // Load or create session
     let sessionId = existingId;
@@ -298,7 +355,7 @@ app.post('/api/chat/stream', async (req, res) => {
     if (!session) {
       sessionId = uuidv4();
       session = createSession();
-      sessions.set(sessionId, session);
+      sessionSet(sessionId, session);
     }
 
     send({ type: 'start', sessionId });
@@ -385,7 +442,7 @@ app.post('/api/chat', async (req, res) => {
     if (!session) {
       sessionId = uuidv4();
       session = createSession();
-      sessions.set(sessionId, session);
+      sessionSet(sessionId, session);
     }
 
     if (!session.title) session.title = message.trim().substring(0, 60);
