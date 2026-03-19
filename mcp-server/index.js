@@ -54,20 +54,6 @@ const tools = [
     }
   },
   {
-    name: 'get_menu_item',
-    description: 'Get details of a single menu item by its ID',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: {
-          type: 'string',
-          description: 'The MongoDB ID of the menu item'
-        }
-      },
-      required: ['id']
-    }
-  },
-  {
     name: 'create_order',
     description:
       'Place a new order at Restaurant restaurant. Requires customer name and at least one menu item.',
@@ -92,16 +78,16 @@ const tools = [
           items: {
             type: 'object',
             properties: {
-              menuItemId: {
-                type: 'string',
-                description: 'The MongoDB ID of the menu item'
+              menuItemIdx: {
+                type: 'number',
+                description: 'The idx of the menu item from the get_menu response'
               },
               quantity: {
                 type: 'number',
                 description: 'Quantity to order (minimum 1)'
               }
             },
-            required: ['menuItemId', 'quantity']
+            required: ['menuItemIdx', 'quantity']
           }
         },
         notes: {
@@ -156,7 +142,7 @@ const tools = [
   },
   {
     name: 'cancel_order',
-    description: 'Cancel an existing order. Cannot cancel already cancelled or delivered orders.',
+    description: 'Cancel a single existing order. Cannot cancel already cancelled or delivered orders.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -166,6 +152,21 @@ const tools = [
         }
       },
       required: ['orderId']
+    }
+  },
+  {
+    name: 'cancel_orders_bulk',
+    description: 'Cancel multiple orders at once. Use this instead of cancel_order when cancelling 2 or more orders.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orderIds: {
+          type: 'array',
+          description: 'List of MongoDB order IDs to cancel',
+          items: { type: 'string' }
+        }
+      },
+      required: ['orderIds']
     }
   },
   {
@@ -197,20 +198,38 @@ async function handleGetMenu(input) {
 
   const query = params.toString() ? `?${params.toString()}` : '';
   const result = await apiRequest('GET', `/api/menu${query}`);
+
+  // Strip imageUrl — the chat UI resolves images directly from the API by item _id
+  if (result.success && Array.isArray(result.data)) {
+    result.data = result.data.map(({ imageUrl, ...rest }) => rest);
+  }
   return result;
 }
 
-async function handleGetMenuItem(input) {
-  const result = await apiRequest('GET', `/api/menu/${input.id}`);
-  return result;
+// idx → _id cache: avoids a DB round-trip on repeated orders for the same item
+const menuIdCache = new Map();
+
+async function resolveMenuItemId(idx) {
+  if (menuIdCache.has(idx)) return menuIdCache.get(idx);
+  const res = await apiRequest('GET', `/api/menu/by-idx/${idx}`);
+  if (!res.data?._id) throw new Error(`Menu item idx ${idx} not found`);
+  menuIdCache.set(idx, res.data._id);
+  return res.data._id;
 }
 
 async function handleCreateOrder(input) {
+  const resolvedItems = await Promise.all(
+    input.items.map(async ({ menuItemIdx, quantity }) => ({
+      menuItemId: await resolveMenuItemId(menuItemIdx),
+      quantity
+    }))
+  );
+
   const result = await apiRequest('POST', '/api/orders', {
     customerName: input.customerName,
     customerPhone: input.customerPhone,
     deliveryAddress: input.deliveryAddress,
-    items: input.items,
+    items: resolvedItems,
     notes: input.notes
   });
   return result;
@@ -232,6 +251,11 @@ async function handleCancelOrder(input) {
   return result;
 }
 
+async function handleCancelOrdersBulk(input) {
+  const result = await apiRequest('POST', '/api/orders/cancel-bulk', { orderIds: input.orderIds });
+  return result;
+}
+
 async function handleListOrders(input) {
   const params = new URLSearchParams();
   if (input.customerPhone) params.append('customerPhone', input.customerPhone);
@@ -245,7 +269,7 @@ async function handleListOrders(input) {
 // Create MCP server
 const server = new Server(
   {
-    name: 'tchopetyamo-restaurant-server',
+    name: 'restaurant-server',
     version: '1.0.0'
   },
   {
@@ -271,9 +295,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'get_menu':
         result = await handleGetMenu(args || {});
         break;
-      case 'get_menu_item':
-        result = await handleGetMenuItem(args);
-        break;
       case 'create_order':
         result = await handleCreateOrder(args);
         break;
@@ -285,6 +306,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case 'cancel_order':
         result = await handleCancelOrder(args);
+        break;
+      case 'cancel_orders_bulk':
+        result = await handleCancelOrdersBulk(args);
         break;
       case 'list_orders':
         result = await handleListOrders(args || {});

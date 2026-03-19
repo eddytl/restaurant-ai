@@ -5,6 +5,7 @@ const fs = require('fs');
 const multer = require('multer');
 const MenuItem = require('../models/MenuItem');
 const Category = require('../models/Category');
+const Media = require('../models/Media');
 
 const UPLOADS_DIR = path.join(__dirname, '../uploads');
 
@@ -37,11 +38,15 @@ router.get('/', async (req, res, next) => {
       query.category = cat._id;
     }
 
+    if (req.query.name) {
+      query.name = { $regex: new RegExp(`^${req.query.name.trim()}$`, 'i') };
+    }
+
     if (req.query.available !== undefined) {
       query.available = req.query.available === 'true';
     }
 
-    const items = await MenuItem.find(query).populate('category', 'name').sort({ name: 1 });
+    const items = await MenuItem.find(query).populate('category', 'name').populate('media', 'url alt').sort({ name: 1 });
 
     res.json({
       success: true,
@@ -53,10 +58,23 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// GET /api/menu/by-idx/:idx - Get a single menu item by its integer idx
+router.get('/by-idx/:idx', async (req, res, next) => {
+  try {
+    const idx = parseInt(req.params.idx);
+    if (isNaN(idx)) return res.status(400).json({ success: false, message: 'Invalid idx' });
+    const item = await MenuItem.findOne({ idx }).populate('category', 'name').populate('media', 'url alt');
+    if (!item) return res.status(404).json({ success: false, message: `Menu item idx ${idx} not found` });
+    res.json({ success: true, data: item });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/menu/:id - Get a single menu item
 router.get('/:id', async (req, res, next) => {
   try {
-    const item = await MenuItem.findById(req.params.id).populate('category', 'name');
+    const item = await MenuItem.findById(req.params.id).populate('category', 'name').populate('media', 'url alt');
 
     if (!item) {
       return res.status(404).json({
@@ -127,7 +145,7 @@ router.put('/:id', async (req, res, next) => {
   }
 });
 
-// POST /api/menu/:id/image - Upload image for a menu item
+// POST /api/menu/:id/image - Upload image for a menu item (creates a Media doc)
 router.post('/:id/image', upload.single('image'), async (req, res, next) => {
   try {
     const item = await MenuItem.findById(req.params.id);
@@ -136,16 +154,21 @@ router.post('/:id/image', upload.single('image'), async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Menu item not found' });
     }
 
-    // Delete old image if exists
-    if (item.imageUrl) {
-      const oldPath = path.join(UPLOADS_DIR, path.basename(item.imageUrl));
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    // Delete old media doc and file if local upload
+    if (item.media) {
+      const oldMedia = await Media.findById(item.media);
+      if (oldMedia && oldMedia.url.startsWith('/uploads/')) {
+        const oldPath = path.join(UPLOADS_DIR, path.basename(oldMedia.url));
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      }
+      await Media.findByIdAndDelete(item.media);
     }
 
-    item.imageUrl = `/uploads/${req.file.filename}`;
+    const media = await Media.create({ url: `/uploads/${req.file.filename}`, alt: item.name });
+    item.media = media._id;
     await item.save();
 
-    res.json({ success: true, data: item, message: 'Image uploaded successfully' });
+    res.json({ success: true, data: { ...item.toObject(), media }, message: 'Image uploaded successfully' });
   } catch (err) {
     if (req.file) fs.unlinkSync(req.file.path);
     next(err);
@@ -158,10 +181,14 @@ router.delete('/:id/image', async (req, res, next) => {
     const item = await MenuItem.findById(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: 'Menu item not found' });
 
-    if (item.imageUrl) {
-      const imgPath = path.join(UPLOADS_DIR, path.basename(item.imageUrl));
-      if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
-      item.imageUrl = null;
+    if (item.media) {
+      const oldMedia = await Media.findById(item.media);
+      if (oldMedia && oldMedia.url.startsWith('/uploads/')) {
+        const imgPath = path.join(UPLOADS_DIR, path.basename(oldMedia.url));
+        if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+      }
+      await Media.findByIdAndDelete(item.media);
+      item.media = null;
       await item.save();
     }
 

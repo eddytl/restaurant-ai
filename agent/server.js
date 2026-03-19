@@ -31,23 +31,29 @@ Guidelines:
 - The currency is XAF (Central African Franc / Franc CFA)
 - Format prices clearly (e.g., "1,500 XAF" or "XAF 1,500")
 - If an item is marked as unavailable (épuisé), inform the customer politely and suggest alternatives
-- When showing the menu, organize it clearly by category
 - Be concise but informative
-- If you need to look up menu items to place an order, use the get_menu tool first to find item IDs
+- To place an order, use create_order directly with the menuItemIdx values the customer chose — NEVER call get_menu just to place an order
 - Always provide order IDs to customers so they can track their orders
-- When listing menu items, ALWAYS use this exact format for EVERY item in EVERY category, no exceptions:
-![item name](imageUrl)
-**Name** — Price XAF
+- When cancelling 2 or more orders, ALWAYS use cancel_orders_bulk (one call) instead of cancel_order one by one
 
-Group items under a ## Category heading.
-NEVER use markdown tables for menu items. NEVER use bullet points for menu items. This rule applies to ALL categories including Menus Composés.
+IMAGE DISPLAY RULE (only when showing menu items to the user):
+- Call get_menu first — idx values are not preserved in conversation history after display.
+- After getting the tool response, display EACH item using EXACTLY this two-line format:
+[image:menu:IDX]
+**Actual Item Name** — Actual Price XAF
+
+  Where IDX is the idx field from the tool response. Group items under a ## Category heading.
+- NEVER use tables, bullet points, or plain bold text to list menu items. ALWAYS use the two-line image+name format above.
 
 You represent the warmth and hospitality of Cameroonian culture. Bienvenue chez Restaurant!`;
 
-function getSystemPrompt(language) {
+function getSystemPrompt(language, customerProfile = null) {
   const defaultLang = language === 'en' ? 'English' : 'French';
   const langInstruction = `\n\nLANGUAGE RULE: The user's preferred language is ${defaultLang}. Always respond in the same language the user writes in. If the user writes in French, respond in French. If the user writes in English, respond in English. If the user writes in another language, respond in that language. When the user's message is ambiguous or very short (e.g. "ok", "yes"), default to ${defaultLang}.`;
-  return BASE_SYSTEM_PROMPT + langInstruction;
+  const customerInstruction = customerProfile?.name
+    ? `\n\nKNOWN CUSTOMER: Name: ${customerProfile.name}, Phone: ${customerProfile.phone}. Never ask for their name or phone number — use this information directly when placing orders.`
+    : '';
+  return BASE_SYSTEM_PROMPT + langInstruction + customerInstruction;
 }
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -59,6 +65,21 @@ let mcpClient = null;
 let anthropicTools = [];
 
 // ─── Session persistence ────────────────────────────────────────────────────
+
+function sanitizeApiMessages(messages) {
+  return (messages || []).map((msg) => {
+    if (!Array.isArray(msg.content)) return msg;
+    return {
+      ...msg,
+      content: msg.content.map((block) => {
+        if (block.type === 'tool_use' && block.input === undefined) {
+          return { ...block, input: {} };
+        }
+        return block;
+      })
+    };
+  });
+}
 
 async function loadSession(sessionId) {
   if (!sessionId) return null;
@@ -73,7 +94,7 @@ async function loadSession(sessionId) {
       const { success, data } = await res.json();
       if (success && data) {
         const session = {
-          messages: data.apiMessages || [],
+          messages: sanitizeApiMessages(data.apiMessages),
           uiMessages: data.uiMessages || [],
           title: data.title,
           createdAt: new Date(data.createdAt)
@@ -139,6 +160,87 @@ async function callMCPTool(name, input) {
   return mcpClient.callTool({ name, arguments: input });
 }
 
+// Post-process get_menu tool result:
+// - Uses the persistent media.idx field from the Media document
+// - Strips _id and media fields (Claude never needs them)
+function processMenuToolResult(rawText) {
+  try {
+    const data = JSON.parse(rawText);
+    if (data.success && Array.isArray(data.data)) {
+      data.data = data.data.map((item) => {
+        const { _id, media, ...rest } = item;
+        return rest; // idx is now a direct field on MenuItem
+      });
+      return JSON.stringify(data);
+    }
+  } catch {}
+  return rawText;
+}
+
+// Post-process order tool results: keep only what Claude needs, strip the rest
+function compressOrder(order) {
+  const o = {
+    id: order._id,
+    status: order.status,
+    total: order.totalAmount,
+    items: (order.items || []).map(({ name, quantity, price }) => ({ name, quantity, price }))
+  };
+  if (order.customer?.name) o.customer = { name: order.customer.name, phone: order.customer.phone };
+  if (order.createdAt) o.at = order.createdAt;
+  if (order.deliveryAddress) o.delivery = order.deliveryAddress;
+  if (order.notes) o.notes = order.notes;
+  return o;
+}
+
+function processOrderToolResult(rawText) {
+  try {
+    const data = JSON.parse(rawText);
+    if (data.success && Array.isArray(data.data)) {
+      data.data = data.data.map(compressOrder);
+      return JSON.stringify(data);
+    }
+    if (data.success && data.data?._id) {
+      data.data = compressOrder(data.data);
+      return JSON.stringify(data);
+    }
+  } catch {}
+  return rawText;
+}
+
+const ORDER_TOOLS = new Set(['list_orders', 'get_order', 'create_order', 'cancel_order', 'cancel_orders_bulk', 'update_order']);
+
+function processToolResult(toolName, raw) {
+  if (toolName === 'get_menu') return processMenuToolResult(raw);
+  if (ORDER_TOOLS.has(toolName)) return processOrderToolResult(raw);
+  return raw;
+}
+
+// ─── Token optimisation helpers ─────────────────────────────────────────────
+
+// Strip [image:type:idx] tokens from assistant history (Claude doesn't need them in context)
+function stripImageUrls(content) {
+  return content.map((block) => {
+    if (block.type === 'text') {
+      return { ...block, text: block.text.replace(/\[image:[^\]]+\]/g, '') };
+    }
+    return block;
+  });
+}
+
+// Option A: rolling window — only send the last MAX_API_MESSAGES to Claude
+const MAX_API_MESSAGES = 16;
+function truncateForApi(messages) {
+  if (messages.length <= MAX_API_MESSAGES) return messages;
+  let start = messages.length - MAX_API_MESSAGES;
+  // Ensure we start on a user message with plain string content (not a tool_result block)
+  while (start < messages.length) {
+    const msg = messages[start];
+    if (msg.role === 'user' && typeof msg.content === 'string') break;
+    start++;
+  }
+  return messages.slice(start);
+}
+
 // ─── Error helper ───────────────────────────────────────────────────────────
 
 function friendlyError(err, language = 'fr') {
@@ -187,7 +289,7 @@ app.post('/api/chat/stream', async (req, res) => {
   const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
   try {
-    const { message, sessionId: existingId, language = 'fr' } = req.body;
+    const { message, sessionId: existingId, language = 'fr', customerProfile = null } = req.body;
     if (!message?.trim()) { send({ type: 'error', message: 'Message is required' }); return res.end(); }
 
     // Load or create session
@@ -215,8 +317,8 @@ app.post('/api/chat/stream', async (req, res) => {
       const stream = anthropic.messages.stream({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 4096,
-        system: getSystemPrompt(language),
-        messages: session.messages,
+        system: getSystemPrompt(language, customerProfile),
+        messages: truncateForApi(session.messages),
         ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {})
       });
 
@@ -226,7 +328,9 @@ app.post('/api/chat/stream', async (req, res) => {
       });
 
       const finalMessage = await stream.finalMessage();
-      session.messages.push({ role: 'assistant', content: finalMessage.content });
+      const { input_tokens, output_tokens } = finalMessage.usage;
+      console.log(`[tokens] turn=${iterations} in=${input_tokens} out=${output_tokens} total=${input_tokens + output_tokens}`);
+      session.messages.push({ role: 'assistant', content: stripImageUrls(finalMessage.content) });
 
       if (finalMessage.stop_reason === 'end_turn') {
         if (totalAssistantText) {
@@ -242,9 +346,14 @@ app.post('/api/chat/stream', async (req, res) => {
           send({ type: 'tool_call', name: toolUse.name });
           try {
             const result = await callMCPTool(toolUse.name, toolUse.input);
-            const text = (result.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
+            const raw = (result.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
               || JSON.stringify(result);
+            const text = processToolResult(toolUse.name, raw);
             toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: text });
+            // Notify the UI of the identified customer after a successful order
+            if (toolUse.name === 'create_order' && toolUse.input?.customerName) {
+              send({ type: 'customer_identified', name: toolUse.input.customerName, phone: toolUse.input.customerPhone || '' });
+            }
           } catch (err) {
             toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify({ error: err.message }), is_error: true });
           }
@@ -287,10 +396,10 @@ app.post('/api/chat', async (req, res) => {
     while (iterations++ < 10) {
       response = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001', max_tokens: 4096, system: getSystemPrompt(language),
-        messages: session.messages,
+        messages: truncateForApi(session.messages),
         ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {})
       });
-      session.messages.push({ role: 'assistant', content: response.content });
+      session.messages.push({ role: 'assistant', content: stripImageUrls(response.content) });
 
       if (response.stop_reason === 'end_turn') break;
       if (response.stop_reason === 'tool_use') {
@@ -298,7 +407,8 @@ app.post('/api/chat', async (req, res) => {
         for (const t of response.content.filter((b) => b.type === 'tool_use')) {
           try {
             const r = await callMCPTool(t.name, t.input);
-            const text = (r.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+            const raw = (r.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+            const text = processToolResult(t.name, raw);
             toolResults.push({ type: 'tool_result', tool_use_id: t.id, content: text });
           } catch (err) {
             toolResults.push({ type: 'tool_result', tool_use_id: t.id, content: JSON.stringify({ error: err.message }), is_error: true });
@@ -326,6 +436,26 @@ app.delete('/api/chat/:sessionId', async (req, res) => {
   sessions.delete(sessionId);
   try { await fetch(`${API_URL}/api/conversations/${sessionId}`, { method: 'DELETE' }); } catch {}
   res.json({ success: true, message: `Session ${sessionId} cleared` });
+});
+
+// ─── Image resolution endpoint (for the chat UI) ─────────────────────────────
+// GET /api/images/menu/:idx → MenuItem.idx → MenuItem.media → Media doc
+// Follows the DB relation so a media swap is always reflected correctly.
+
+app.get('/api/images/:type/:idx', async (req, res) => {
+  const { idx } = req.params;
+  const idxNum = parseInt(idx);
+  if (isNaN(idxNum)) return res.status(400).json({ success: false, message: 'Invalid idx' });
+
+  try {
+    const r = await fetch(`${API_URL}/api/menu/by-idx/${idxNum}`);
+    if (!r.ok) { res.status(r.status).json(await r.json()); return; }
+    const { data: item } = await r.json();
+    if (!item?.media) return res.status(404).json({ success: false, message: 'No media for this item' });
+    res.json({ success: true, data: item.media });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to resolve media' });
+  }
 });
 
 // ─── Conversation proxy endpoints (for the chat UI) ───────────────────────────

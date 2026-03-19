@@ -10,6 +10,7 @@ const orderRoutes = require('./routes/orders');
 const conversationRoutes = require('./routes/conversations');
 const customerRoutes = require('./routes/customers');
 const categoryRoutes = require('./routes/categories');
+const mediaRoutes = require('./routes/media');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -39,6 +40,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/media', mediaRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

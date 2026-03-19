@@ -7,7 +7,7 @@
     <div
       class="flex flex-col"
       :class="[
-        message.role === 'user' ? 'items-end max-w-[75%]' : 'items-start max-w-[90%]'
+        message.role === 'user' ? 'items-end max-w-[75%]' : 'items-start w-full'
       ]"
     >
       <div
@@ -21,11 +21,19 @@
             : ''
         ]"
       >
-        <div class="bubble-text" v-html="formattedContent" />
+        <div ref="bubbleEl" class="bubble-text" v-html="formattedContent" />
         <span v-if="isStreaming && message.content" class="inline-block w-0.5 h-[1em] bg-tc-accent align-text-bottom ml-0.5 animate-blink" />
       </div>
       <div class="flex items-center gap-2 mt-1 px-1">
         <span class="text-[11px] text-tc-faint">{{ formattedTime }}</span>
+        <button
+          v-if="message.isError"
+          @click="retry"
+          class="text-[11px] text-tc-accent hover:underline flex items-center gap-1"
+        >
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/><path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/></svg>
+          Réessayer
+        </button>
       </div>
     </div>
 
@@ -33,12 +41,54 @@
 </template>
 
 <script setup>
-import { ref, watch, onUnmounted } from 'vue';
+import { ref, watch, onUnmounted, nextTick } from 'vue';
+import { useChatStore } from '../stores/chat';
+import { useLanguageStore } from '../stores/language';
 
 const props = defineProps({
   message: { type: Object, required: true },
   isStreaming: { type: Boolean, default: false }
 });
+
+const chatStore = useChatStore();
+const langStore = useLanguageStore();
+function retry() { chatStore.retryLastMessage(langStore.lang); }
+
+// Module-level cache: menuItemId → imageUrl (persists across component instances)
+const imageCache = new Map();
+
+// Neutral gray placeholder — keeps card height stable before the real image loads
+const PLACEHOLDER_SRC = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 155 120'%3E%3Crect width='155' height='120' fill='%23e2e8f0'/%3E%3C/svg%3E";
+
+const bubbleEl = ref(null);
+
+async function resolveMenuImages() {
+  await nextTick();
+  if (!bubbleEl.value) return;
+  const imgs = [...bubbleEl.value.querySelectorAll('img[data-image-idx]')];
+  if (!imgs.length) return;
+
+  await Promise.all(imgs.map(async (img) => {
+    const type = img.dataset.imageType;
+    const idx = img.dataset.imageIdx;
+    const key = `${type}:${idx}`;
+
+    // Synchronous cache hit — set immediately, no flicker on re-render
+    if (imageCache.has(key)) {
+      img.src = imageCache.get(key);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/images/${type}/${idx}`);
+      const { success, data } = await res.json();
+      if (success && data?.url) {
+        imageCache.set(key, data.url);
+        img.src = data.url;
+      }
+    } catch {}
+  }));
+}
 
 const formattedTime = (() => {
   const date = props.message.timestamp instanceof Date
@@ -56,6 +106,7 @@ function scheduleRender() {
   renderRaf = requestAnimationFrame(() => {
     renderRaf = null;
     formattedContent.value = parseMarkdown(props.message.content || '');
+    resolveMenuImages();
   });
 }
 
@@ -68,11 +119,20 @@ function parseMarkdown(raw) {
   // Escape HTML
   text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-  // Images (before inline formatting to avoid escaping the URL)
+  // Media images: [image:type:idx] — URL resolved by the UI via /api/images/:type/:idx
+  text = text.replace(/\[image:([^:\]]+):([^\]]+)\]/g, (_, type, idx) => {
+    const safeType = type.trim().replace(/"/g, '&quot;');
+    const safeIdx = idx.trim().replace(/"/g, '&quot;');
+    // Use cached URL synchronously if available, otherwise placeholder keeps the layout stable
+    const cached = imageCache.get(`${type.trim()}:${idx.trim()}`);
+    const src = cached || PLACEHOLDER_SRC;
+    return `<img class="md-img${cached ? '' : ' img-loading'}" src="${src}" data-image-type="${safeType}" data-image-idx="${safeIdx}" alt="image-${safeIdx}" />`;
+  });
+
+  // Standard images
   text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
     const safeAlt = alt.replace(/"/g, '&quot;');
-    const safeUrl = url.trim();
-    return `<img class="md-img" src="${safeUrl}" alt="${safeAlt}" loading="lazy" />`;
+    return `<img class="md-img" src="${url.trim()}" alt="${safeAlt}" loading="lazy" />`;
   });
 
   // Inline formatting
@@ -89,7 +149,7 @@ function parseMarkdown(raw) {
 
   const isTableRow = (l) => /^\s*\|.+\|\s*$/.test(l);
   const isSeparatorRow = (l) => /^\s*\|[\s\-:|]+\|\s*$/.test(l);
-  const isImgLine = (l) => /<img[^>]+class="md-img"/.test(l);
+  const isImgLine = (l) => /<img[^>]+class="md-img/.test(l);
 
   function flushList() {
     if (inList && listItems.length) {
@@ -242,6 +302,16 @@ function parseMarkdown(raw) {
   max-height: 220px;
   display: block;
 }
+.bubble-text :deep(.img-loading) {
+  @apply bg-tc-surface;
+  animation: shimmer 1.4s ease-in-out infinite;
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+}
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
 
 /* Menu card grid */
 .bubble-text :deep(.menu-card-grid) {
@@ -249,6 +319,8 @@ function parseMarkdown(raw) {
   grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
   gap: 10px;
   margin: 10px 0;
+  min-width: min(380px, 100%);
+  width: 100%;
 }
 .bubble-text :deep(.menu-card) {
   @apply rounded-2xl border border-tc-border overflow-hidden bg-tc-surface;

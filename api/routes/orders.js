@@ -210,6 +210,28 @@ router.put('/:id', async (req, res, next) => {
   }
 });
 
+// POST /api/orders/cancel-bulk - Cancel multiple orders in one operation
+router.post('/cancel-bulk', async (req, res, next) => {
+  try {
+    const { orderIds } = req.body;
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'orderIds array is required' });
+    }
+
+    const result = await Order.updateMany(
+      { _id: { $in: orderIds }, status: { $nin: TERMINAL_STATUSES } },
+      { $set: { status: 'cancelled' } }
+    );
+
+    res.json({
+      success: true,
+      message: `Cancelled ${result.modifiedCount}/${orderIds.length} orders`
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // DELETE /api/orders/:id - Cancel an order
 router.delete('/:id', async (req, res, next) => {
   try {

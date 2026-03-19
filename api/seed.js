@@ -2,6 +2,7 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const MenuItem = require('./models/MenuItem');
 const Category = require('./models/Category');
+const Media = require('./models/Media');
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/restaurant';
 
@@ -215,21 +216,25 @@ async function seed() {
       return;
     }
 
-    // Build name -> _id map for categories
+    // Build category name -> _id map
     const categoryDocs = await Category.find();
     const categoryMap = {};
     for (const doc of categoryDocs) categoryMap[doc.name] = doc._id;
 
-    const resolvedItems = menuItems.map((item) => ({
-      ...item,
-      category: categoryMap[item.category]
-    }));
+    // Create Media docs for each item's imageUrl, then link to MenuItem
+    console.log(`Creating ${menuItems.length} media docs...`);
+    const resolvedItems = await Promise.all(
+      menuItems.map(async (item, i) => {
+        const { imageUrl, category, ...rest } = item;
+        const media = await Media.create({ url: imageUrl, alt: item.name });
+        return { idx: i + 1, ...rest, category: categoryMap[category], media: media._id };
+      })
+    );
 
     console.log(`Inserting ${resolvedItems.length} menu items...`);
     const inserted = await MenuItem.insertMany(resolvedItems);
     console.log(`Successfully inserted ${inserted.length} menu items.`);
 
-    // Summary by category
     for (const doc of categoryDocs) {
       const count = resolvedItems.filter((i) => String(i.category) === String(doc._id)).length;
       if (count) console.log(`  ${doc.name}: ${count} items`);
