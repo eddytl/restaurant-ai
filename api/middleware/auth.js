@@ -22,4 +22,13 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireAdmin, JWT_SECRET };
+// Sets req.user if a valid Bearer token is present, but never blocks the request
+function optionalAuth(req, res, next) {
+  const auth = req.headers.authorization;
+  if (auth?.startsWith('Bearer ')) {
+    try { req.user = jwt.verify(auth.slice(7), JWT_SECRET); } catch {}
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireAdmin, optionalAuth, JWT_SECRET };

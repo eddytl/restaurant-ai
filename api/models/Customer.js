@@ -30,7 +30,12 @@ const customerSchema = new mongoose.Schema(
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Order'
       }
-    ]
+    ],
+    preferredBranch: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Branch',
+      default: null
+    }
   },
   {
     timestamps: true

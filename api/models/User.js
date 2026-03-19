@@ -6,6 +6,7 @@ const userSchema = new Schema({
   email:    { type: String, required: true, unique: true, lowercase: true, trim: true },
   password: { type: String, required: true },
   role:     { type: String, enum: ['user', 'admin'], default: 'user' },
+  branch:   { type: require('mongoose').Schema.Types.ObjectId, ref: 'Branch', default: null },
 }, { timestamps: true });
 
 userSchema.pre('save', async function () {

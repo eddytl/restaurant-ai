@@ -177,10 +177,9 @@ watch(() => props.message.content, scheduleRender, { immediate: true });
 /* Menu card grid */
 .bubble-text :deep(.menu-card-grid) {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 165px));
   gap: 10px;
   margin: 10px 0;
-  min-width: min(380px, 100%);
   width: 100%;
 }
 .bubble-text :deep(.menu-card) {

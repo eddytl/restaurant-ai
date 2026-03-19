@@ -11,7 +11,7 @@ router.get('/', async (req, res, next) => {
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(100, parseInt(req.query.limit) || 20);
     const [users, total] = await Promise.all([
-      User.find({}, '-password').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+      User.find({}, '-password').populate('branch', 'name city').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
       User.countDocuments()
     ]);
     res.json({ success: true, data: users, page, limit, total });
@@ -21,11 +21,11 @@ router.get('/', async (req, res, next) => {
 // POST /api/users
 router.post('/', async (req, res, next) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, branch } = req.body;
     if (!name || !email || !password) {
       return res.status(400).json({ success: false, message: 'Nom, email et mot de passe requis' });
     }
-    const user = new User({ name, email, password, role: role || 'user' });
+    const user = new User({ name, email, password, role: role || 'user', branch: branch || null });
     await user.save();
     const { password: _pw, ...data } = user.toObject();
     res.status(201).json({ success: true, data });
@@ -40,14 +40,15 @@ router.post('/', async (req, res, next) => {
 // PUT /api/users/:id
 router.put('/:id', async (req, res, next) => {
   try {
-    const { name, email, role, password } = req.body;
+    const { name, email, role, password, branch } = req.body;
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
 
-    if (name)  user.name  = name;
-    if (email) user.email = email;
-    if (role)  user.role  = role;
-    if (password) user.password = password; // triggers bcrypt pre-save hook
+    if (name)     user.name   = name;
+    if (email)    user.email  = email;
+    if (role)     user.role   = role;
+    if (password) user.password = password;
+    user.branch = branch || null; // triggers bcrypt pre-save hook
 
     await user.save();
     const { password: _pw, ...data } = user.toObject();

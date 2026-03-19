@@ -23,6 +23,7 @@ const categoryRoutes = require('./routes/categories');
 const mediaRoutes = require('./routes/media');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
+const branchRoutes = require('./routes/branches');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -69,6 +70,7 @@ app.use('/api/conversations', conversationRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/media', mediaRoutes);
+app.use('/api/branches', branchRoutes);
 
 // Image resolution — mirrors the agent endpoint so admin-ui can resolve [image:menu:idx] tokens
 app.get('/api/images/:type/:idx', async (req, res) => {

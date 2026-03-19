@@ -61,4 +61,10 @@ export const api = {
   getConversations:   (params = {}) => req('/conversations?' + new URLSearchParams(params)),
   getConversation:    (sessionId)   => req(`/conversations/${sessionId}`),
   deleteConversation: (sessionId)   => req(`/conversations/${sessionId}`, { method: 'DELETE' }),
+
+  // Branches
+  getBranches:   (params = {}) => req('/branches?' + new URLSearchParams(params)),
+  createBranch:  (body)        => req('/branches', { method: 'POST', body: JSON.stringify(body) }),
+  updateBranch:  (id, body)    => req(`/branches/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteBranch:  (id)          => req(`/branches/${id}`, { method: 'DELETE' }),
 }

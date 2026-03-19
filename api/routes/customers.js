@@ -1,13 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const Customer = require('../models/Customer');
+const { optionalAuth } = require('../middleware/auth');
 
 // GET /api/customers - List all customers with pagination and optional search
-router.get('/', async (req, res, next) => {
+router.get('/', optionalAuth, async (req, res, next) => {
   try {
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(100, parseInt(req.query.limit) || 20);
     const query = {};
+
+    // Non-admin users only see customers from their own branch
+    if (req.user && req.user.role !== 'admin' && req.user.branch) {
+      query.preferredBranch = req.user.branch;
+    }
+
     if (req.query.search) {
       const re = new RegExp(req.query.search.trim(), 'i');
       query.$or = [{ name: re }, { phone: re }];

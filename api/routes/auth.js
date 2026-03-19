@@ -12,12 +12,12 @@ router.post('/login', async (req, res, next) => {
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email et mot de passe requis' });
     }
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).populate('branch', 'name city');
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ success: false, message: 'Identifiants incorrects' });
     }
     const token = jwt.sign(
-      { id: user._id, email: user.email, name: user.name, role: user.role },
+      { id: user._id, email: user.email, name: user.name, role: user.role, branch: user.branch?._id || null },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES }
     );
@@ -25,7 +25,7 @@ router.post('/login', async (req, res, next) => {
       success: true,
       data: {
         token,
-        user: { id: user._id, name: user.name, email: user.email, role: user.role }
+        user: { id: user._id, name: user.name, email: user.email, role: user.role, branch: user.branch || null }
       }
     });
   } catch (err) {

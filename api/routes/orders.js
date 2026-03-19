@@ -3,13 +3,19 @@ const router = express.Router();
 const Order = require('../models/Order');
 const MenuItem = require('../models/MenuItem');
 const Customer = require('../models/Customer');
+const { optionalAuth } = require('../middleware/auth');
 
 const TERMINAL_STATUSES = ['cancelled', 'delivered'];
 
 // GET /api/orders - List all orders with optional filter
-router.get('/', async (req, res, next) => {
+router.get('/', optionalAuth, async (req, res, next) => {
   try {
     const query = {};
+
+    // Non-admin users only see orders from their own branch
+    if (req.user && req.user.role !== 'admin' && req.user.branch) {
+      query.branch = req.user.branch;
+    }
 
     if (req.query.status) {
       query.status = req.query.status;
@@ -65,7 +71,7 @@ router.get('/:id', async (req, res, next) => {
 // POST /api/orders - Create a new order
 router.post('/', async (req, res, next) => {
   try {
-    const { customerName, customerPhone, deliveryAddress, items, notes } = req.body;
+    const { customerName, customerPhone, deliveryAddress, items, notes, branchId } = req.body;
 
     if (!customerName) {
       return res.status(400).json({ success: false, message: 'Customer name is required' });
@@ -118,12 +124,15 @@ router.post('/', async (req, res, next) => {
     }
 
     // Upsert customer first to get the reference
+    const customerUpdate = {
+      $set: { name: customerName, lastOrderAt: new Date() },
+      $inc: { totalOrders: 1, totalSpent: totalAmount }
+    };
+    if (branchId) customerUpdate.$set.preferredBranch = branchId;
+
     const customer = await Customer.findOneAndUpdate(
       { phone: customerPhone },
-      {
-        $set: { name: customerName, lastOrderAt: new Date() },
-        $inc: { totalOrders: 1, totalSpent: totalAmount }
-      },
+      customerUpdate,
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
@@ -133,7 +142,8 @@ router.post('/', async (req, res, next) => {
       items: resolvedItems,
       totalAmount,
       status: 'pending',
-      notes: notes || ''
+      notes: notes || '',
+      branch: branchId || null
     });
 
     await order.save();

@@ -5,6 +5,7 @@
     "orders": "Commandes",
     "customers": "Clients",
     "conversations": "Conversations",
+    "branches": "Agences",
     "users": "Utilisateurs"
   },
   "common": {
@@ -127,6 +128,22 @@
     "result": "résultat",
     "results": "résultats",
     "perPage": "/ page"
+  },
+  "branches": {
+    "title": "Agences",
+    "new": "Nouvelle agence",
+    "editTitle": "Modifier l'agence",
+    "createTitle": "Nouvelle agence",
+    "name": "Nom de l'agence",
+    "address": "Adresse",
+    "city": "Ville",
+    "phone": "Téléphone",
+    "email": "Email",
+    "active": "Active",
+    "inactive": "Inactive",
+    "deleteConfirm": "Supprimer cette agence ?",
+    "deleteMessage": "sera définitivement supprimée.",
+    "noBranches": "Aucune agence trouvée"
   },
   "users": {
     "title": "Utilisateurs",

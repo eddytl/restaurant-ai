@@ -33,6 +33,15 @@ async function apiRequest(method, path, body = null) {
 // Tool definitions
 const tools = [
   {
+    name: 'get_branches',
+    description: 'Get the list of active restaurant branches (agences). Call this when the customer wants to place an order and no branch has been selected yet.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
     name: 'get_menu',
     description:
       'Get menu items from the Restaurant restaurant. Can filter by category or availability. Categories: BEIGNETS, SALADES, BOISSON, POULETS, BURGER, MENUS_COMPOSES',
@@ -93,9 +102,13 @@ const tools = [
         notes: {
           type: 'string',
           description: 'Special instructions or notes for the order'
+        },
+        branchId: {
+          type: 'string',
+          description: 'The MongoDB ID of the branch (agence) the customer chose. Required — always call get_branches first if unknown.'
         }
       },
-      required: ['customerName', 'items']
+      required: ['customerName', 'items', 'branchId']
     }
   },
   {
@@ -230,8 +243,14 @@ async function handleCreateOrder(input) {
     customerPhone: input.customerPhone,
     deliveryAddress: input.deliveryAddress,
     items: resolvedItems,
-    notes: input.notes
+    notes: input.notes,
+    branchId: input.branchId
   });
+  return result;
+}
+
+async function handleGetBranches() {
+  const result = await apiRequest('GET', '/api/branches?active=true');
   return result;
 }
 
@@ -292,6 +311,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     let result;
 
     switch (name) {
+      case 'get_branches':
+        result = await handleGetBranches();
+        break;
       case 'get_menu':
         result = await handleGetMenu(args || {});
         break;

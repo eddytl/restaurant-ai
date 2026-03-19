@@ -5,6 +5,7 @@
     "orders": "Orders",
     "customers": "Customers",
     "conversations": "Conversations",
+    "branches": "Branches",
     "users": "Users"
   },
   "common": {
@@ -127,6 +128,22 @@
     "result": "result",
     "results": "results",
     "perPage": "/ page"
+  },
+  "branches": {
+    "title": "Branches",
+    "new": "New branch",
+    "editTitle": "Edit branch",
+    "createTitle": "New branch",
+    "name": "Branch name",
+    "address": "Address",
+    "city": "City",
+    "phone": "Phone",
+    "email": "Email",
+    "active": "Active",
+    "inactive": "Inactive",
+    "deleteConfirm": "Delete this branch?",
+    "deleteMessage": "will be permanently deleted.",
+    "noBranches": "No branches found"
   },
   "users": {
     "title": "Users",

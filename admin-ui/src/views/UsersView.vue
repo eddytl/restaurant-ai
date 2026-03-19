@@ -9,11 +9,12 @@ import SkeletonRows from '@/components/ui/SkeletonRows.vue'
 
 const { t } = useI18n()
 
-const users   = ref([])
-const loading = ref(true)
-const page    = ref(1)
-const limit   = ref(20)
-const total   = ref(0)
+const users    = ref([])
+const branches = ref([])
+const loading  = ref(true)
+const page     = ref(1)
+const limit    = ref(20)
+const total    = ref(0)
 
 const toast      = ref(null)
 const confirmDel = ref({ open: false, loading: false, user: null })
@@ -21,14 +22,18 @@ const showModal  = ref(false)
 const editUser   = ref(null)
 const saving     = ref(false)
 
-const form = ref({ name: '', email: '', password: '', role: 'user' })
+const form = ref({ name: '', email: '', password: '', role: 'user', branch: '' })
 
 async function load() {
   loading.value = true
   try {
-    const res = await api.getUsers({ page: page.value, limit: limit.value })
-    users.value = res.data || []
-    total.value = res.total || 0
+    const [usersRes, branchesRes] = await Promise.all([
+      api.getUsers({ page: page.value, limit: limit.value }),
+      api.getBranches({ active: true }),
+    ])
+    users.value    = usersRes.data    || []
+    total.value    = usersRes.total   || 0
+    branches.value = branchesRes.data || []
   } catch (e) {
     toast.value?.add(e.message, 'error')
   } finally { loading.value = false }
@@ -36,28 +41,30 @@ async function load() {
 
 onMounted(load)
 
-const pages = () => Math.ceil(total.value / limit.value)
-
 function openCreate() {
   editUser.value = null
-  form.value = { name: '', email: '', password: '', role: 'user' }
+  form.value = { name: '', email: '', password: '', role: 'user', branch: '' }
   showModal.value = true
 }
 
 function openEdit(u) {
   editUser.value = u
-  form.value = { name: u.name, email: u.email, password: '', role: u.role }
+  form.value = { name: u.name, email: u.email, password: '', role: u.role, branch: u.branch?._id || '' }
   showModal.value = true
 }
 
 async function save() {
   saving.value = true
   try {
-    const body = { name: form.value.name, email: form.value.email, role: form.value.role }
+    const body = { name: form.value.name, email: form.value.email, role: form.value.role, branch: form.value.branch || null }
     if (form.value.password) body.password = form.value.password
     if (editUser.value) {
       const res = await api.updateUser(editUser.value._id, body)
-      Object.assign(editUser.value, res.data)
+      const updated = res.data
+      if (updated.branch && typeof updated.branch === 'string') {
+        updated.branch = branches.value.find(b => b._id === updated.branch) || null
+      }
+      Object.assign(editUser.value, updated)
       toast.value?.add(`Utilisateur « ${res.data.name} » mis à jour.`, 'success')
     } else {
       if (!form.value.password) {
@@ -66,7 +73,11 @@ async function save() {
       }
       body.password = form.value.password
       const res = await api.createUser(body)
-      users.value.unshift(res.data)
+      const newUser = res.data
+      if (newUser.branch && typeof newUser.branch === 'string') {
+        newUser.branch = branches.value.find(b => b._id === newUser.branch) || null
+      }
+      users.value.unshift(newUser)
       total.value++
       toast.value?.add(`Utilisateur « ${res.data.name} » créé.`, 'success')
     }
@@ -118,7 +129,7 @@ function initials(name) { return (name || '?').split(' ').map(w => w[0]).join(''
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
         </svg>
-        Nouvel utilisateur
+        {{ $t('users.new') }}
       </button>
     </div>
 
@@ -131,12 +142,13 @@ function initials(name) { return (name || '?').split(' ').map(w => w[0]).join(''
               <th class="th">{{ $t('common.name') }}</th>
               <th class="th">{{ $t('common.email') }}</th>
               <th class="th">{{ $t('common.role') }}</th>
+              <th class="th">{{ $t('nav.branches') }}</th>
               <th class="th">{{ $t('common.createdAt') }}</th>
               <th class="th">{{ $t('common.actions') }}</th>
             </tr>
           </thead>
           <SkeletonRows :rows="5" :has-avatar="true"
-            :cols="['w-1/4', 'w-1/4', 'w-1/8', 'w-1/6', 'w-16']" />
+            :cols="['w-1/4', 'w-1/5', 'w-1/8', 'w-1/6', 'w-1/8', 'w-16']" />
         </table>
       </div>
       <div v-else-if="users.length" class="overflow-x-auto">
@@ -146,6 +158,7 @@ function initials(name) { return (name || '?').split(' ').map(w => w[0]).join(''
               <th class="th">{{ $t('common.name') }}</th>
               <th class="th">{{ $t('common.email') }}</th>
               <th class="th">{{ $t('common.role') }}</th>
+              <th class="th">{{ $t('nav.branches') }}</th>
               <th class="th">{{ $t('common.createdAt') }}</th>
               <th class="th">{{ $t('common.actions') }}</th>
             </tr>
@@ -165,6 +178,10 @@ function initials(name) { return (name || '?').split(' ').map(w => w[0]).join(''
                 <span :class="['badge text-xs font-medium', roleBadge(u.role)]">
                   {{ u.role === 'admin' ? $t('users.admin') : $t('users.user') }}
                 </span>
+              </td>
+              <td class="td text-sm text-gray-500 dark:text-gray-400">
+                <span v-if="u.branch">{{ u.branch.name }}<span class="text-xs text-gray-400 ml-1">· {{ u.branch.city }}</span></span>
+                <span v-else class="text-gray-300 dark:text-gray-600">—</span>
               </td>
               <td class="td text-xs text-gray-400">{{ fmtDate(u.createdAt) }}</td>
               <td class="td">
@@ -198,9 +215,9 @@ function initials(name) { return (name || '?').split(' ').map(w => w[0]).join(''
     <ConfirmModal
       :open="confirmDel.open"
       :loading="confirmDel.loading"
-      title="Supprimer cet utilisateur ?"
+      :title="$t('users.deleteConfirm')"
       :message="confirmDel.user ? `« ${confirmDel.user.name} » sera définitivement supprimé.` : ''"
-      confirm-label="Supprimer"
+      :confirm-label="$t('common.delete')"
       @confirm="doDelete"
       @cancel="confirmDel.open = false"
     />
@@ -213,38 +230,45 @@ function initials(name) { return (name || '?').split(' ').map(w => w[0]).join(''
         <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="showModal = false" />
         <div class="relative card w-full max-w-md p-6 shadow-2xl">
           <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-5">
-            {{ editUser ? 'Modifier l\'utilisateur' : 'Nouvel utilisateur' }}
+            {{ editUser ? $t('users.editTitle') : $t('users.createTitle') }}
           </h3>
           <form @submit.prevent="save" class="space-y-4">
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Nom</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('common.name') }}</label>
               <input v-model="form.name" type="text" class="input" required />
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Email</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('common.email') }}</label>
               <input v-model="form.email" type="email" class="input" required />
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                Mot de passe {{ editUser ? '(laisser vide pour ne pas changer)' : '' }}
+                {{ $t('common.password') }} {{ editUser ? `(${$t('users.passwordHint')})` : '' }}
               </label>
               <input v-model="form.password" type="password" class="input" :required="!editUser" />
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Rôle</label>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('common.role') }}</label>
               <select v-model="form.role" class="input">
-                <option value="user">Utilisateur</option>
-                <option value="admin">Administrateur</option>
+                <option value="user">{{ $t('users.user') }}</option>
+                <option value="admin">{{ $t('users.admin') }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('nav.branches') }}</label>
+              <select v-model="form.branch" class="input">
+                <option value="">— Aucune agence —</option>
+                <option v-for="b in branches" :key="b._id" :value="b._id">{{ b.name }} · {{ b.city }}</option>
               </select>
             </div>
             <div class="flex gap-3 pt-2">
-              <button type="button" @click="showModal = false" class="btn-ghost flex-1 justify-center">Annuler</button>
+              <button type="button" @click="showModal = false" class="btn-ghost flex-1 justify-center">{{ $t('common.cancel') }}</button>
               <button type="submit" :disabled="saving" class="btn-primary flex-1 justify-center">
                 <svg v-if="saving" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
                   <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
                 </svg>
-                {{ saving ? 'Enregistrement…' : 'Enregistrer' }}
+                {{ saving ? $t('common.saving') : $t('common.save') }}
               </button>
             </div>
           </form>

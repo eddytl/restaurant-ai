@@ -60,6 +60,11 @@ const orderSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: ''
+    },
+    branch: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Branch',
+      default: null
     }
   },
   {
