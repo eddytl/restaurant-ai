@@ -21,12 +21,18 @@ router.get('/', async (req, res, next) => {
       query.customer = customer._id;
     }
 
-    const orders = await Order.find(query).populate('customer').sort({ createdAt: -1 });
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 20);
+    const [orders, total] = await Promise.all([
+      Order.find(query).populate('customer').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+      Order.countDocuments(query)
+    ]);
 
     res.json({
       success: true,
       data: orders,
-      message: `Found ${orders.length} order(s)`
+      page, limit, total,
+      message: `Found ${total} order(s)`
     });
   } catch (err) {
     next(err);

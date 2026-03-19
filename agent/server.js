@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import PQueue from 'p-queue';
 import { v4 as uuidv4 } from 'uuid';
 import Anthropic from '@anthropic-ai/sdk';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -58,6 +59,11 @@ function getSystemPrompt(language, customerProfile = null) {
 }
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+// Async queue — limits concurrent Claude API calls to prevent overload
+// concurrency: max parallel Claude calls; max queue size beyond that returns 429
+const claudeQueue = new PQueue({ concurrency: 5 });
+const QUEUE_MAX = 20;
 
 // In-memory session cache: sessionId -> { messages, uiMessages, title, createdAt }
 // LRU-lite: evict the oldest entry when the Map exceeds MAX_SESSIONS
@@ -126,8 +132,8 @@ async function loadSession(sessionId) {
   return null;
 }
 
-function createSession() {
-  return { messages: [], uiMessages: [], title: null, createdAt: new Date() };
+function createSession(clientId = null) {
+  return { messages: [], uiMessages: [], title: null, createdAt: new Date(), clientId };
 }
 
 async function persistSession(sessionId, session) {
@@ -139,7 +145,8 @@ async function persistSession(sessionId, session) {
         sessionId,
         title: session.title || 'New conversation',
         apiMessages: session.messages,
-        uiMessages: session.uiMessages
+        uiMessages: session.uiMessages,
+        clientId: session.clientId || null
       })
     });
   } catch (err) {
@@ -304,7 +311,7 @@ const app = express();
 // CORS — restrict to configured origins (default: localhost dev)
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : ['http://localhost:5173', 'http://localhost:3000'];
+  : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:8080'];
 app.use(cors({
   origin: (origin, cb) => {
     // Allow requests with no origin (curl, Postman, same-origin)
@@ -329,13 +336,18 @@ app.use(express.json({ limit: '64kb' }));
 app.get('/health', (_req, res) => {
   res.json({
     success: true,
-    data: { status: 'ok', mcpConnected: !!mcpClient, toolsLoaded: anthropicTools.length, activeSessions: sessions.size }
+    data: { status: 'ok', mcpConnected: !!mcpClient, toolsLoaded: anthropicTools.length, activeSessions: sessions.size, queue: { pending: claudeQueue.pending, size: claudeQueue.size, max: QUEUE_MAX } }
   });
 });
 
 // ─── Streaming chat endpoint ─────────────────────────────────────────────────
 
 app.post('/api/chat/stream', async (req, res) => {
+  // Reject early (before SSE headers) if queue is overloaded
+  if (claudeQueue.size >= QUEUE_MAX) {
+    return res.status(503).json({ success: false, message: 'Server busy, please try again in a moment.' });
+  }
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -345,7 +357,7 @@ app.post('/api/chat/stream', async (req, res) => {
   const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
   try {
-    const { message, sessionId: existingId, language = 'fr', customerProfile = null } = req.body;
+    const { message, sessionId: existingId, language = 'fr', customerProfile = null, clientId = null } = req.body;
     if (!message?.trim()) { send({ type: 'error', message: 'Message is required' }); return res.end(); }
     if (message.length > 2000) { send({ type: 'error', message: 'Message too long (max 2000 characters).' }); return res.end(); }
 
@@ -354,8 +366,10 @@ app.post('/api/chat/stream', async (req, res) => {
     let session = existingId ? await loadSession(existingId) : null;
     if (!session) {
       sessionId = uuidv4();
-      session = createSession();
+      session = createSession(clientId);
       sessionSet(sessionId, session);
+    } else if (clientId && !session.clientId) {
+      session.clientId = clientId; // backfill on first message for existing sessions
     }
 
     send({ type: 'start', sessionId });
@@ -370,56 +384,58 @@ app.post('/api/chat/stream', async (req, res) => {
     let iterations = 0;
     let totalAssistantText = '';
 
-    while (iterations++ < 10) {
-      const stream = anthropic.messages.stream({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 4096,
-        system: getSystemPrompt(language, customerProfile),
-        messages: truncateForApi(session.messages),
-        ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {})
-      });
+    // Agentic loop runs inside the queue — limits concurrent Claude API calls to 5
+    await claudeQueue.add(async () => {
+      while (iterations++ < 10) {
+        const stream = anthropic.messages.stream({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 4096,
+          system: getSystemPrompt(language, customerProfile),
+          messages: truncateForApi(session.messages),
+          ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {})
+        });
 
-      stream.on('text', (text) => {
-        totalAssistantText += text;
-        send({ type: 'token', text });
-      });
+        stream.on('text', (text) => {
+          totalAssistantText += text;
+          send({ type: 'token', text });
+        });
 
-      const finalMessage = await stream.finalMessage();
-      const { input_tokens, output_tokens } = finalMessage.usage;
-      console.log(`[tokens] turn=${iterations} in=${input_tokens} out=${output_tokens} total=${input_tokens + output_tokens}`);
-      session.messages.push({ role: 'assistant', content: stripImageUrls(finalMessage.content) });
+        const finalMessage = await stream.finalMessage();
+        const { input_tokens, output_tokens } = finalMessage.usage;
+        console.log(`[tokens] turn=${iterations} in=${input_tokens} out=${output_tokens} total=${input_tokens + output_tokens} queue=${claudeQueue.size}/${claudeQueue.pending}`);
+        session.messages.push({ role: 'assistant', content: stripImageUrls(finalMessage.content) });
 
-      if (finalMessage.stop_reason === 'end_turn') {
-        if (totalAssistantText) {
-          session.uiMessages.push({ id: uuidv4(), role: 'assistant', content: totalAssistantText, timestamp: new Date() });
-        }
-        await persistSession(sessionId, session);
-        break;
-      }
-
-      if (finalMessage.stop_reason === 'tool_use') {
-        const toolResults = [];
-        for (const toolUse of finalMessage.content.filter((b) => b.type === 'tool_use')) {
-          send({ type: 'tool_call', name: toolUse.name });
-          try {
-            const result = await callMCPTool(toolUse.name, toolUse.input);
-            const raw = (result.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
-              || JSON.stringify(result);
-            const text = processToolResult(toolUse.name, raw);
-            toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: text });
-            // Notify the UI of the identified customer after a successful order
-            if (toolUse.name === 'create_order' && toolUse.input?.customerName) {
-              send({ type: 'customer_identified', name: toolUse.input.customerName, phone: toolUse.input.customerPhone || '' });
-            }
-          } catch (err) {
-            toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify({ error: err.message }), is_error: true });
+        if (finalMessage.stop_reason === 'end_turn') {
+          if (totalAssistantText) {
+            session.uiMessages.push({ id: uuidv4(), role: 'assistant', content: totalAssistantText, timestamp: new Date() });
           }
+          await persistSession(sessionId, session);
+          break;
         }
-        session.messages.push({ role: 'user', content: toolResults });
-      } else {
-        break;
+
+        if (finalMessage.stop_reason === 'tool_use') {
+          const toolResults = [];
+          for (const toolUse of finalMessage.content.filter((b) => b.type === 'tool_use')) {
+            send({ type: 'tool_call', name: toolUse.name });
+            try {
+              const result = await callMCPTool(toolUse.name, toolUse.input);
+              const raw = (result.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
+                || JSON.stringify(result);
+              const text = processToolResult(toolUse.name, raw);
+              toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: text });
+              if (toolUse.name === 'create_order' && toolUse.input?.customerName) {
+                send({ type: 'customer_identified', name: toolUse.input.customerName, phone: toolUse.input.customerPhone || '' });
+              }
+            } catch (err) {
+              toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify({ error: err.message }), is_error: true });
+            }
+          }
+          session.messages.push({ role: 'user', content: toolResults });
+        } else {
+          break;
+        }
       }
-    }
+    });
 
     send({ type: 'done' });
     res.end();
@@ -491,7 +507,11 @@ app.post('/api/chat', async (req, res) => {
 app.delete('/api/chat/:sessionId', async (req, res) => {
   const { sessionId } = req.params;
   sessions.delete(sessionId);
-  try { await fetch(`${API_URL}/api/conversations/${sessionId}`, { method: 'DELETE' }); } catch {}
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (req.headers['x-client-id']) headers['x-client-id'] = req.headers['x-client-id'];
+    await fetch(`${API_URL}/api/conversations/${sessionId}`, { method: 'DELETE', headers });
+  } catch {}
   res.json({ success: true, message: `Session ${sessionId} cleared` });
 });
 
@@ -517,9 +537,15 @@ app.get('/api/images/:type/:idx', async (req, res) => {
 
 // ─── Conversation proxy endpoints (for the chat UI) ───────────────────────────
 
-app.get('/api/conversations', async (_req, res) => {
+app.get('/api/conversations', async (req, res) => {
   try {
-    const r = await fetch(`${API_URL}/api/conversations`);
+    const qs = new URLSearchParams();
+    if (req.query.page)  qs.set('page',  req.query.page);
+    if (req.query.limit) qs.set('limit', req.query.limit);
+    const url = `${API_URL}/api/conversations${qs.toString() ? `?${qs}` : ''}`;
+    const headers = {};
+    if (req.headers['x-client-id']) headers['x-client-id'] = req.headers['x-client-id'];
+    const r = await fetch(url, { headers });
     res.status(r.status).json(await r.json());
   } catch (err) {
     res.status(500).json({ success: false, message: 'Failed to fetch conversations' });

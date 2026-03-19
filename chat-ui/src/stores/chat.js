@@ -1,6 +1,14 @@
 import { defineStore } from 'pinia';
 import { v4 as uuidv4 } from 'uuid';
 
+// Stable browser identity — isolates conversations per device
+function getClientId() {
+  let id = localStorage.getItem('restaurant-client-id');
+  if (!id) { id = uuidv4(); localStorage.setItem('restaurant-client-id', id); }
+  return id;
+}
+const CLIENT_ID = getClientId();
+
 const CONV_LIST_KEY = 'restaurant-conv-list';
 const convKey = (id) => `restaurant-conv-${id}`;
 
@@ -43,7 +51,7 @@ export const useChatStore = defineStore('chat', {
 
       // 2. Fetch from API in background and update
       try {
-        const res = await fetch('/api/conversations');
+        const res = await fetch('/api/conversations', { headers: { 'X-Client-Id': CLIENT_ID } });
         if (!res.ok) return;
         const { success, data } = await res.json();
         if (success && Array.isArray(data)) {
@@ -124,7 +132,7 @@ export const useChatStore = defineStore('chat', {
         const response = await fetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: trimmedContent, sessionId: this.sessionId, language, customerProfile: this.customerProfile })
+          body: JSON.stringify({ message: trimmedContent, sessionId: this.sessionId, language, customerProfile: this.customerProfile, clientId: CLIENT_ID })
         });
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -190,7 +198,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     async deleteConversation(sessionId) {
-      try { await fetch(`/api/chat/${sessionId}`, { method: 'DELETE' }); } catch {}
+      try { await fetch(`/api/chat/${sessionId}`, { method: 'DELETE', headers: { 'X-Client-Id': CLIENT_ID } }); } catch {}
       removeCache(convKey(sessionId));
       this.conversationHistory = this.conversationHistory.filter(c => c.id !== sessionId);
       writeCache(CONV_LIST_KEY, this.conversationHistory);
@@ -228,7 +236,7 @@ export const useChatStore = defineStore('chat', {
 
     async clearConversation() {
       if (this.sessionId) {
-        try { await fetch(`/api/chat/${this.sessionId}`, { method: 'DELETE' }); } catch {}
+        try { await fetch(`/api/chat/${this.sessionId}`, { method: 'DELETE', headers: { 'X-Client-Id': CLIENT_ID } }); } catch {}
         removeCache(convKey(this.sessionId));
         this.conversationHistory = this.conversationHistory.filter(c => c.id !== this.sessionId);
         writeCache(CONV_LIST_KEY, this.conversationHistory);
