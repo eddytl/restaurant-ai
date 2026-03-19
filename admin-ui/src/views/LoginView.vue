@@ -32,24 +32,26 @@ async function submit() {
 <template>
   <div class="min-h-screen bg-gray-50 dark:bg-gray-950 flex">
     <!-- Left panel — branding -->
-    <div class="hidden lg:flex lg:w-1/2 bg-brand-600 flex-col justify-between p-12 relative overflow-hidden">
-      <!-- Background decoration -->
-      <div class="absolute inset-0 opacity-10">
-        <div class="absolute -top-24 -left-24 w-96 h-96 bg-white rounded-full" />
-        <div class="absolute -bottom-24 -right-24 w-96 h-96 bg-white rounded-full" />
-        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-white rounded-full" />
-      </div>
+    <div class="hidden lg:flex lg:w-1/2 flex-col justify-between p-12 relative overflow-hidden"
+      style="background-image: url('/restaurant-bg.png'); background-size: cover; background-position: center;">
+      <!-- Dark overlay -->
+      <div class="absolute inset-0 bg-brand-900/75" />
 
       <div class="relative z-10">
         <div class="w-10 h-10 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
-          <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M8 10c0-2.21 1.79-4 4-4s4 1.79 4 4"/>
-            <path d="M7 10h10v2H7z" stroke="none" fill="currentColor" opacity="0.9"/>
-            <line x1="6" y1="12" x2="18" y2="12"/>
-            <circle cx="12" cy="15.5" r="2"/>
-            <path d="M7 24v-3.5c0-1.5 2-2.5 5-2.5s5 1 5 2.5V24"/>
-            <path d="M11 18l1 2 1-2"/>
-          </svg>
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="14" cy="14" r="14" fill="#8b1a1a"/>
+              <!-- Plate -->
+              <ellipse cx="14" cy="17" rx="8" ry="3" fill="white" opacity="0.15"/>
+              <ellipse cx="14" cy="17" rx="8" ry="3" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
+              <!-- Food dome -->
+              <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="white" opacity="0.22"/>
+              <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
+              <!-- Steam lines -->
+              <path d="M11 8.5 Q10.5 7 11 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+              <path d="M14 8 Q13.5 6.5 14 5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+              <path d="M17 8.5 Q16.5 7 17 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+            </svg>
         </div>
       </div>
 

@@ -23,20 +23,19 @@ const { t } = useI18n()
       class="w-full py-4 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
     >
       <div class="w-9 h-9 bg-brand-600 rounded-xl flex items-center justify-center shrink-0">
-        <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <!-- Toque dome -->
-          <path d="M8 10c0-2.21 1.79-4 4-4s4 1.79 4 4"/>
-          <!-- Hat band -->
-          <path d="M7 10h10v2H7z" stroke="none" fill="currentColor" opacity="0.9"/>
-          <!-- Hat brim -->
-          <line x1="6" y1="12" x2="18" y2="12"/>
-          <!-- Head -->
-          <circle cx="12" cy="15.5" r="2"/>
-          <!-- Chef coat shoulders -->
-          <path d="M7 24v-3.5c0-1.5 2-2.5 5-2.5s5 1 5 2.5V24"/>
-          <!-- Coat lapels -->
-          <path d="M11 18l1 2 1-2"/>
-        </svg>
+       <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="14" cy="14" r="14" fill="#8b1a1a"/>
+              <!-- Plate -->
+              <ellipse cx="14" cy="17" rx="8" ry="3" fill="white" opacity="0.15"/>
+              <ellipse cx="14" cy="17" rx="8" ry="3" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
+              <!-- Food dome -->
+              <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="white" opacity="0.22"/>
+              <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
+              <!-- Steam lines -->
+              <path d="M11 8.5 Q10.5 7 11 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+              <path d="M14 8 Q13.5 6.5 14 5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+              <path d="M17 8.5 Q16.5 7 17 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+            </svg>
       </div>
     </button>
 
@@ -44,14 +43,19 @@ const { t } = useI18n()
     <div v-else class="px-4 py-4 flex items-center justify-between">
       <div class="flex items-center gap-3 min-w-0">
         <div class="w-9 h-9 bg-brand-600 rounded-xl flex items-center justify-center shrink-0">
-          <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M8 10c0-2.21 1.79-4 4-4s4 1.79 4 4"/>
-            <path d="M7 10h10v2H7z" stroke="none" fill="currentColor" opacity="0.9"/>
-            <line x1="6" y1="12" x2="18" y2="12"/>
-            <circle cx="12" cy="15.5" r="2"/>
-            <path d="M7 24v-3.5c0-1.5 2-2.5 5-2.5s5 1 5 2.5V24"/>
-            <path d="M11 18l1 2 1-2"/>
-          </svg>
+         <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="14" cy="14" r="14" fill="#8b1a1a"/>
+              <!-- Plate -->
+              <ellipse cx="14" cy="17" rx="8" ry="3" fill="white" opacity="0.15"/>
+              <ellipse cx="14" cy="17" rx="8" ry="3" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
+              <!-- Food dome -->
+              <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="white" opacity="0.22"/>
+              <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
+              <!-- Steam lines -->
+              <path d="M11 8.5 Q10.5 7 11 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+              <path d="M14 8 Q13.5 6.5 14 5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+              <path d="M17 8.5 Q16.5 7 17 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+            </svg>
         </div>
         <div class="min-w-0 overflow-hidden">
           <p class="text-sm font-bold text-gray-900 dark:text-gray-100 whitespace-nowrap">Restaurant</p>
