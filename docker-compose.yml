@@ -16,6 +16,19 @@ services:
       retries: 5
       start_period: 10s
 
+  redis:
+    image: redis:7-alpine
+    container_name: restaurant-redis
+    restart: unless-stopped
+    command: redis-server --save "" --appendonly no
+    networks:
+      - restaurant-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   api:
     build:
       context: ./api
@@ -27,6 +40,7 @@ services:
     environment:
       - MONGODB_URI=mongodb://mongodb:27017/restaurant
       - PORT=3001
+      - NODE_ENV=production
     volumes:
       - menu_images:/app/uploads
     depends_on:
@@ -54,8 +68,12 @@ services:
       - API_URL=http://api:3001
       - MCP_SERVER_PATH=/app/mcp-server/index.js
       - PORT=3000
+      - REDIS_URL=redis://redis:6379
+      - NODE_ENV=production
     depends_on:
       api:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - restaurant-net
@@ -80,9 +98,66 @@ services:
     networks:
       - restaurant-net
 
+  loki:
+    image: grafana/loki:latest
+    container_name: restaurant-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - restaurant-net
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: restaurant-promtail
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/promtail/config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    networks:
+      - restaurant-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: restaurant-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+    networks:
+      - restaurant-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: restaurant-grafana
+    restart: unless-stopped
+    ports:
+      - "3003:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - restaurant-net
+
 volumes:
   mongodb_data:
   menu_images:
+  prometheus_data:
+  grafana_data:
 
 networks:
   restaurant-net:

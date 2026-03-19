@@ -3,6 +3,52 @@ import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import PQueue from 'p-queue';
+import pino from 'pino';
+import pinoHttp from 'pino-http';
+import Redis from 'ioredis';
+import promClient from 'prom-client';
+
+const logger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+  transport: process.env.NODE_ENV === 'development'
+    ? { target: 'pino-pretty', options: { colorize: true, ignore: 'pid,hostname' } }
+    : undefined
+});
+
+// ─── Prometheus metrics ──────────────────────────────────────────────────────
+promClient.collectDefaultMetrics({ prefix: 'agent_' });
+
+const httpDuration = new promClient.Histogram({
+  name: 'agent_http_request_duration_seconds',
+  help: 'HTTP request duration',
+  labelNames: ['method', 'route', 'status'],
+  buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5]
+});
+const activeSessions = new promClient.Gauge({
+  name: 'agent_active_sessions',
+  help: 'Number of sessions in L1 cache'
+});
+const claudeTokensTotal = new promClient.Counter({
+  name: 'agent_claude_tokens_total',
+  help: 'Total Claude tokens used',
+  labelNames: ['direction']
+});
+const queueSize = new promClient.Gauge({
+  name: 'agent_queue_size',
+  help: 'Pending tasks in Claude queue'
+});
+
+// Redis — optional L2 session cache. Falls back to DB-only if not configured.
+const SESSION_TTL = 86400; // 24h
+let redis = null;
+if (process.env.REDIS_URL) {
+  redis = new Redis(process.env.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 });
+  redis.on('error', (err) => logger.warn({ err: err.message }, 'Redis error'));
+  redis.connect().then(() => logger.info('Redis connected')).catch(() => {
+    logger.warn('Redis unavailable — sessions use L1+DB only');
+    redis = null;
+  });
+}
 import { v4 as uuidv4 } from 'uuid';
 import Anthropic from '@anthropic-ai/sdk';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -78,9 +124,16 @@ function evictOldestSession() {
 }
 
 function sessionSet(id, session) {
-  sessions.delete(id); // move to end (most-recently-used)
+  // L1: in-memory LRU
+  sessions.delete(id);
   evictOldestSession();
   sessions.set(id, session);
+  // L2: Redis (fire-and-forget, TTL 24h)
+  if (redis) {
+    redis.setex(`session:${id}`, SESSION_TTL, JSON.stringify(session))
+      .catch((err) => logger.warn({ err: err.message }, 'Redis session write failed'));
+  }
+  activeSessions.set(sessions.size);
 }
 
 let mcpClient = null;
@@ -106,10 +159,26 @@ function sanitizeApiMessages(messages) {
 async function loadSession(sessionId) {
   if (!sessionId) return null;
 
-  // In-memory cache hit
+  // L1: in-memory hit
   if (sessions.has(sessionId)) return sessions.get(sessionId);
 
-  // Load from DB
+  // L2: Redis hit
+  if (redis) {
+    try {
+      const raw = await redis.get(`session:${sessionId}`);
+      if (raw) {
+        const session = JSON.parse(raw);
+        session.createdAt = new Date(session.createdAt);
+        sessions.set(sessionId, session); // warm L1
+        logger.info({ sessionId }, 'Session loaded from Redis');
+        return session;
+      }
+    } catch (err) {
+      logger.warn({ err: err.message }, 'Redis session read failed');
+    }
+  }
+
+  // L3: DB fallback
   try {
     const res = await fetch(`${API_URL}/api/conversations/${sessionId}`);
     if (res.ok) {
@@ -122,12 +191,12 @@ async function loadSession(sessionId) {
           createdAt: new Date(data.createdAt)
         };
         sessionSet(sessionId, session);
-        console.log(`[Session] Loaded ${sessionId} from DB (${session.messages.length} msgs)`);
+        logger.info({ sessionId, msgs: session.messages.length }, 'Session loaded from DB');
         return session;
       }
     }
   } catch (err) {
-    console.error('[Session] DB load failed:', err.message);
+    logger.warn({ err: err.message }, 'Session DB load failed');
   }
   return null;
 }
@@ -150,7 +219,7 @@ async function persistSession(sessionId, session) {
       })
     });
   } catch (err) {
-    console.error('[Session] DB persist failed:', err.message);
+    logger.warn({ err: err.message }, 'Session DB persist failed');
   }
 }
 
@@ -172,9 +241,9 @@ async function initMCP() {
       description: t.description,
       input_schema: t.inputSchema
     }));
-    console.log(`MCP ready: ${tools.map((t) => t.name).join(', ')}`);
+    logger.info({ tools: tools.map((t) => t.name) }, 'MCP ready');
   } catch (err) {
-    console.error('MCP init failed:', err.message);
+    logger.error({ err: err.message }, 'MCP init failed');
   }
 }
 
@@ -307,6 +376,14 @@ function friendlyError(err, language = 'fr') {
 // ─── Express app ────────────────────────────────────────────────────────────
 
 const app = express();
+app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/health' || req.url === '/metrics' } }));
+
+// Track HTTP duration per route
+app.use((req, res, next) => {
+  const end = httpDuration.startTimer();
+  res.on('finish', () => end({ method: req.method, route: req.path, status: res.statusCode }));
+  next();
+});
 
 // CORS — restrict to configured origins (default: localhost dev)
 const allowedOrigins = process.env.ALLOWED_ORIGINS
@@ -331,6 +408,12 @@ const chatLimiter = rateLimit({
 app.use('/api/chat', chatLimiter);
 
 app.use(express.json({ limit: '64kb' }));
+
+// Prometheus metrics endpoint
+app.get('/metrics', async (_req, res) => {
+  res.set('Content-Type', promClient.register.contentType);
+  res.end(await promClient.register.metrics());
+});
 
 // Health check
 app.get('/health', (_req, res) => {
@@ -402,7 +485,10 @@ app.post('/api/chat/stream', async (req, res) => {
 
         const finalMessage = await stream.finalMessage();
         const { input_tokens, output_tokens } = finalMessage.usage;
-        console.log(`[tokens] turn=${iterations} in=${input_tokens} out=${output_tokens} total=${input_tokens + output_tokens} queue=${claudeQueue.size}/${claudeQueue.pending}`);
+        logger.info({ turn: iterations, in: input_tokens, out: output_tokens, total: input_tokens + output_tokens, queueSize: claudeQueue.size, queuePending: claudeQueue.pending }, 'Claude tokens');
+        claudeTokensTotal.inc({ direction: 'in' }, input_tokens);
+        claudeTokensTotal.inc({ direction: 'out' }, output_tokens);
+        queueSize.set(claudeQueue.size);
         session.messages.push({ role: 'assistant', content: stripImageUrls(finalMessage.content) });
 
         if (finalMessage.stop_reason === 'end_turn') {
@@ -440,7 +526,7 @@ app.post('/api/chat/stream', async (req, res) => {
     send({ type: 'done' });
     res.end();
   } catch (err) {
-    console.error('Stream error:', err.status || '', err.message);
+    logger.error({ status: err.status, err: err.message }, 'Stream error');
     try { send({ type: 'error', message: friendlyError(err, language) }); } catch {}
     res.end();
   }
@@ -497,7 +583,7 @@ app.post('/api/chat', async (req, res) => {
 
     res.json({ success: true, data: { response: finalText, sessionId } });
   } catch (err) {
-    console.error('Chat error:', err.status || '', err.message);
+    logger.error({ status: err.status, err: err.message }, 'Chat error');
     res.status(500).json({ success: false, message: friendlyError(err, language) });
   }
 });
@@ -507,6 +593,8 @@ app.post('/api/chat', async (req, res) => {
 app.delete('/api/chat/:sessionId', async (req, res) => {
   const { sessionId } = req.params;
   sessions.delete(sessionId);
+  activeSessions.set(sessions.size);
+  if (redis) redis.del(`session:${sessionId}`).catch(() => {});
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (req.headers['x-client-id']) headers['x-client-id'] = req.headers['x-client-id'];
@@ -591,7 +679,7 @@ process.on('SIGINT', shutdown);
 async function start() {
   await initMCP();
   app.listen(PORT, () => {
-    console.log(`Restaurant Agent running on port ${PORT}`);
+    logger.info({ port: PORT }, 'Restaurant Agent running');
   });
 }
-start().catch((err) => { console.error(err); process.exit(1); });
+start().catch((err) => { logger.fatal({ err }, 'Fatal startup error'); process.exit(1); });
