@@ -98,6 +98,20 @@ services:
     networks:
       - restaurant-net
 
+  admin-ui:
+    build:
+      context: ./admin-ui
+      dockerfile: Dockerfile
+    container_name: restaurant-admin-ui
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - restaurant-net
+
   loki:
     image: grafana/loki:latest
     container_name: restaurant-loki

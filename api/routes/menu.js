@@ -46,12 +46,18 @@ router.get('/', async (req, res, next) => {
       query.available = req.query.available === 'true';
     }
 
-    const items = await MenuItem.find(query).populate('category', 'name').populate('media', 'url alt').sort({ name: 1 });
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 50);
+    const [items, total] = await Promise.all([
+      MenuItem.find(query).populate('category', 'name').populate('media', 'url alt').sort({ name: 1 }).skip((page - 1) * limit).limit(limit),
+      MenuItem.countDocuments(query)
+    ]);
 
     res.json({
       success: true,
       data: items,
-      message: `Found ${items.length} menu item(s)`
+      page, limit, total,
+      message: `Found ${total} menu item(s)`
     });
   } catch (err) {
     next(err);

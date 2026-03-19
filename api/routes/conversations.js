@@ -10,7 +10,7 @@ router.get('/', async (req, res, next) => {
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(50, parseInt(req.query.limit) || 20);
     const conversations = await Conversation.find(query)
-      .select('sessionId title updatedAt')
+      .select('sessionId title createdAt updatedAt uiMessages')
       .sort({ updatedAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit);

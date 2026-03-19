@@ -21,6 +21,8 @@ const conversationRoutes = require('./routes/conversations');
 const customerRoutes = require('./routes/customers');
 const categoryRoutes = require('./routes/categories');
 const mediaRoutes = require('./routes/media');
+const authRoutes = require('./routes/auth');
+const userRoutes = require('./routes/users');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -59,12 +61,29 @@ app.use((req, res, next) => {
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 // Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/menu', menuRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/media', mediaRoutes);
+
+// Image resolution — mirrors the agent endpoint so admin-ui can resolve [image:menu:idx] tokens
+app.get('/api/images/:type/:idx', async (req, res) => {
+  const { idx } = req.params;
+  const idxNum = parseInt(idx);
+  if (isNaN(idxNum)) return res.status(400).json({ success: false, message: 'Invalid idx' });
+  try {
+    const MenuItem = require('./models/MenuItem');
+    const item = await MenuItem.findOne({ idx: idxNum }).populate('media', 'url alt');
+    if (!item?.media) return res.status(404).json({ success: false, message: 'No media for this item' });
+    res.json({ success: true, data: item.media });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to resolve media' });
+  }
+});
 
 // Health check
 app.get('/health', (req, res) => {
@@ -88,11 +107,21 @@ app.use((err, req, res, next) => {
 });
 
 // Only start the HTTP server when run directly (not when required by tests)
+async function seedDefaultAdmin() {
+  const User = require('./models/User');
+  const count = await User.countDocuments();
+  if (count === 0) {
+    await User.create({ name: 'Admin', email: 'admin@restaurant.cm', password: 'admin123', role: 'admin' });
+    logger.info('Default admin created — email: admin@restaurant.cm  password: admin123');
+  }
+}
+
 if (require.main === module) {
   mongoose
     .connect(MONGODB_URI)
-    .then(() => {
+    .then(async () => {
       logger.info({ uri: MONGODB_URI }, 'Connected to MongoDB');
+      await seedDefaultAdmin();
       app.listen(PORT, () => logger.info({ port: PORT }, 'Restaurant API running'));
     })
     .catch((err) => {
