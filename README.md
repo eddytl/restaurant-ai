@@ -1,291 +1,263 @@
-# Restaurant AI Agent
+# Restaurant AI — Tchopetyamo
 
-A complete AI-powered restaurant assistant, a Cameroonian restaurant. Customers can browse the menu, place orders, check order status, and manage their orders via a beautiful Claude-like chat interface.
+A full-stack AI-powered restaurant assistant for a Cameroonian restaurant. Customers can browse the menu, place orders, track order status, and chat with an AI agent. Administrators manage everything from a dedicated dashboard.
+
+---
 
 ## Architecture
 
 ```
 restaurant-ai/
-├── api/          - Express.js REST API (port 3001) + MongoDB
-├── mcp-server/   - MCP server (stdio transport) wrapping the API
-├── agent/        - Express.js AI agent (port 3000) using Anthropic + MCP client
-└── chat-ui/      - Vue 3 + Vite chat interface (port 5173)
+├── api/          — Express.js REST API (port 3001) + MongoDB
+├── mcp-server/   — MCP server (stdio) wrapping the API as AI tools
+├── agent/        — Express.js AI agent (port 3000) — Claude + MCP client
+├── chat-ui/      — Vue 3 customer chat interface (port 8080)
+└── admin-ui/     — Vue 3 admin dashboard (port 8081)
 ```
 
-### How it works
+### Request flow
 
-1. **Chat UI** sends messages to the **Agent** via HTTP
-2. **Agent** uses Claude (Anthropic SDK) with tools provided by the **MCP Server**
-3. **MCP Server** exposes restaurant tools (menu, orders) that call the **API**
-4. **API** reads/writes from **MongoDB**
+```
+Customer → Chat UI → Agent (Claude AI + MCP) → MCP Server → API → MongoDB
+Admin    → Admin UI ──────────────────────────────────────→ API → MongoDB
+```
 
 ---
 
-## Prerequisites
+## Services
 
-- Node.js 18+
-- MongoDB running locally (or provide a remote URI)
+| Service | Port | Description |
+|---------|------|-------------|
+| `api` | 3001 | REST API + MongoDB |
+| `agent` | 3000 | AI agent (Claude via Anthropic SDK) |
+| `chat-ui` | 8080 | Customer chat interface |
+| `admin-ui` | 8081 | Admin dashboard |
+| `mongodb` | 27017 | MongoDB database |
+
+---
+
+## Quick Start (Docker)
+
+### Prerequisites
+
+- Docker & Docker Compose
 - An Anthropic API key
 
----
-
-## Setup & Running
-
-### Step 1 — Start MongoDB
-
-Make sure MongoDB is running on your machine:
+### 1 — Configure environment
 
 ```bash
-# Linux/macOS (systemd)
-sudo systemctl start mongod
+# api/.env
+MONGODB_URI=mongodb://mongodb:27017/tchopetyamo
+PORT=3001
+JWT_SECRET=your-secret-key
 
-# macOS (homebrew)
-brew services start mongodb-community
-
-# Or run directly
-mongod --dbpath /data/db
-```
-
-### Step 2 — Seed the database
-
-```bash
-cd api
-npm install
-cp .env.example .env        # edit if needed
-npm run seed
-```
-
-Expected output:
-```
-Connected to MongoDB
-Clearing existing menu items...
-Inserting 41 menu items...
-  BEIGNETS: 8 items
-  SALADES: 3 items
-  BOISSON: 5 items
-  POULETS: 4 items
-  BURGER: 2 items
-  MENUS_COMPOSES: 19 items
-Database seeded successfully!
-```
-
-### Step 3 — Start the API server (port 3001)
-
-```bash
-cd api
-npm start
-# or for development with auto-reload:
-npm run dev
-```
-
-Test it:
-```bash
-curl http://localhost:3001/health
-curl http://localhost:3001/api/menu
-```
-
-### Step 4 — Install MCP server dependencies
-
-```bash
-cd mcp-server
-npm install
-```
-
-The MCP server is spawned automatically by the agent — you don't need to start it manually.
-
-### Step 5 — Start the Agent server (port 3000)
-
-```bash
-cd agent
-npm install
-cp .env.example .env
-# Edit .env and set your ANTHROPIC_API_KEY
-nano .env
-npm start
-```
-
-Your `.env` should look like:
-```
+# agent/.env
 ANTHROPIC_API_KEY=sk-ant-...
-MCP_SERVER_PATH=../mcp-server/index.js
-API_URL=http://localhost:3001
+API_URL=http://api:3001
 PORT=3000
 ```
 
-Test it:
-```bash
-curl http://localhost:3000/health
-
-curl -X POST http://localhost:3000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "What is on the menu?"}'
-```
-
-### Step 6 — Start the Chat UI (port 5173)
+### 2 — Start all services
 
 ```bash
-cd chat-ui
-npm install
-npm run dev
+docker compose up -d
 ```
 
-Open your browser at: **http://localhost:5173**
+### 3 — Seed the database
+
+```bash
+docker compose exec api node seed.js
+```
+
+### 4 — Access the apps
+
+| App | URL |
+|-----|-----|
+| Chat UI | http://localhost:8080 |
+| Admin UI | http://localhost:8081 |
+
+**Default admin credentials:** `admin@restaurant.cm` / `admin123`
+
+---
+
+## Admin Dashboard
+
+The admin UI (`/admin-ui`) is a full-featured management panel built with Vue 3, Tailwind CSS, and the Tchopetyamo brand colors.
+
+### Features
+
+- **Dashboard** — KPI cards (revenue, orders, customers, menu items), monthly bar chart, order status doughnut, daily line chart with 7/14/30-day range selector
+- **Menu Management** — paginated card grid, image upload, category filtering, availability toggle, create/edit/delete
+- **Orders** — paginated table, status filter tabs, one-click status progression, cancel flow
+- **Customers** — server-side search, total spent, order history
+- **Conversations** — full chat replay panel with markdown rendering, menu card images, and chat bubbles per message
+- **Users** — role-based CRUD (admin only), create/edit/delete users
+- **i18n** — French / English with live switching
+- **Skeleton loading** — all tables and KPI cards show content-matching skeletons while loading
+- **Dark mode** — fully supported across all views
+
+### Tech stack
+
+- Vue 3 (Composition API, `<script setup>`)
+- Pinia (auth, theme, sidebar stores)
+- Vue Router (lazy-loaded routes, `adminOnly` guard)
+- vue-i18n 9
+- Chart.js + vue-chartjs
+- Tailwind CSS
+- Vite → multi-stage Docker build → nginx
+
+---
+
+## Chat UI
+
+The customer chat interface (`/chat-ui`) provides a Claude-like chat experience.
+
+### Features
+
+- Real-time streaming responses
+- Menu browsing with image cards
+- Order placement and tracking
+- Conversation history persistence
+- Light / dark theme
+- French / English
 
 ---
 
 ## API Reference
 
-### Menu Endpoints (port 3001)
+### Auth
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/menu` | List all menu items |
-| GET | `/api/menu?category=BEIGNETS` | Filter by category |
-| GET | `/api/menu?available=true` | Filter by availability |
-| GET | `/api/menu/:id` | Get a single menu item |
-| POST | `/api/menu` | Create a menu item |
-| PUT | `/api/menu/:id` | Update a menu item |
-| DELETE | `/api/menu/:id` | Delete a menu item |
+| POST | `/api/auth/login` | Login → JWT token |
+| GET | `/api/auth/me` | Get current user |
 
-**Categories:** `BEIGNETS`, `SALADES`, `BOISSON`, `POULETS`, `BURGER`, `MENUS_COMPOSES`
-
-### Order Endpoints (port 3001)
+### Users (admin only)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/orders` | List all orders |
-| GET | `/api/orders?status=pending` | Filter by status |
-| GET | `/api/orders?customerPhone=...` | Filter by phone |
-| GET | `/api/orders/:id` | Get an order (populated) |
-| POST | `/api/orders` | Create an order |
-| PUT | `/api/orders/:id` | Update an order |
-| DELETE | `/api/orders/:id` | Cancel an order |
+| GET | `/api/users` | List users (paginated) |
+| POST | `/api/users` | Create user |
+| PUT | `/api/users/:id` | Update user |
+| DELETE | `/api/users/:id` | Delete user |
 
-**Order statuses:** `pending`, `confirmed`, `preparing`, `ready`, `delivered`, `cancelled`
-
-### Chat Endpoint (port 3000)
+### Menu
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/chat` | Send a message |
-| DELETE | `/api/chat/:sessionId` | Clear a session |
+| GET | `/api/menu` | List items (paginated, filterable) |
+| GET | `/api/menu/:id` | Get single item |
+| GET | `/api/menu/by-idx/:idx` | Get item by integer idx |
+| POST | `/api/menu` | Create item |
+| PUT | `/api/menu/:id` | Update item |
+| DELETE | `/api/menu/:id` | Delete item |
+| POST | `/api/menu/:id/image` | Upload image |
+
+**Query params:** `page`, `limit`, `category`, `name`, `available`
+
+### Orders
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/orders` | List orders (paginated) |
+| GET | `/api/orders/:id` | Get order |
+| POST | `/api/orders` | Create order |
+| PUT | `/api/orders/:id` | Update order / status |
+| DELETE | `/api/orders/:id` | Cancel order |
+
+**Statuses:** `pending` → `confirmed` → `preparing` → `ready` → `delivered` / `cancelled`
+
+### Customers
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/customers` | List customers (paginated, searchable) |
+| GET | `/api/customers/:phone` | Get customer by phone |
+
+### Conversations
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/conversations` | List conversations (paginated) |
+| GET | `/api/conversations/:sessionId` | Get full conversation |
+| POST | `/api/conversations` | Create / upsert conversation |
+| PATCH | `/api/conversations/:sessionId/rename` | Rename conversation |
+| DELETE | `/api/conversations/:sessionId` | Delete conversation |
+
+### Images
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/images/:type/:idx` | Resolve menu item image URL by idx |
+
+### Chat (agent — port 3000)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/chat` | Send message (streaming SSE) |
+| DELETE | `/api/chat/:sessionId` | Clear session |
 | GET | `/health` | Health check |
-
-**POST /api/chat body:**
-```json
-{
-  "message": "Show me the menu",
-  "sessionId": "optional-existing-session-id"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "response": "Here is our menu...",
-    "sessionId": "uuid-v4"
-  }
-}
-```
 
 ---
 
 ## MCP Tools
 
-The MCP server exposes these tools to the AI agent:
+The MCP server exposes these tools to the Claude agent:
 
 | Tool | Description |
 |------|-------------|
-| `get_menu` | Get menu items (filter by category/availability) |
-| `get_menu_item` | Get a single menu item by ID |
+| `get_menu` | List menu items (filter by category / availability) |
+| `get_menu_item` | Get single item by ID |
 | `create_order` | Place a new order |
-| `get_order` | Get order details by ID |
-| `update_order` | Update order status/notes/address |
+| `get_order` | Get order details |
+| `update_order` | Update status, notes, address |
 | `cancel_order` | Cancel an order |
-| `list_orders` | List orders (filter by phone/status) |
+| `list_orders` | List orders by phone / status |
 
 ---
 
-## Menu
+## Local Development (without Docker)
 
-### BEIGNETS
-| Item | Price |
-|------|-------|
-| BHB | 1,500 XAF |
-| BH | 1,000 XAF |
-| BH 2 ailes | 2,000 XAF |
-| Portion de haricot | 600 XAF |
-| Bouillie | 600 XAF |
-| Portion de beignets maïs | 600 XAF |
-| Portion de beignets farine | 600 XAF *(épuisé)* |
-| Promotion | 100 XAF |
+### Prerequisites
 
-### SALADES
-| Item | Price |
-|------|-------|
-| Salade bitchakala | 2,500 XAF |
-| Salade de fruits | 2,200 XAF |
-| Salade simple | 1,500 XAF |
-
-### BOISSON
-| Item | Price |
-|------|-------|
-| Yamo Lemon | 1,500 XAF |
-| Yamo Ananas | 1,500 XAF |
-| DJARA | 1,000 XAF |
-| Abangalafa | 2,000 XAF |
-| Yaourt bikutsi | 2,500 XAF |
-
-### POULETS
-| Item | Price |
-|------|-------|
-| Ndogmangolo soya/poulet (New) | 2,500 XAF |
-| Poulet pané | 1,100 XAF |
-| Frites de plantain | 600 XAF |
-| Poulet braisé | 2,800 XAF |
-
-### BURGER
-| Item | Price |
-|------|-------|
-| Burger poulet | 3,000 XAF |
-| Burger boeuf | 3,500 XAF |
-
-### MENUS COMPOSÉS (selection)
-| Item | Price | Contents |
-|------|-------|----------|
-| Menu spécial | 4,000 XAF | 3 morceaux de poulets + frites |
-| Menu 9 | 5,000 XAF | Salade simple + 2 morceaux de poulets + frites + djara |
-| Menu pour 2 | 12,000 XAF | 4 ailes + 4 morceaux + 2 frites + 2 djara + 2 salades |
-| Menu pour 3 | 16,000 XAF | 6 morceaux + ailes + 3 frites + 3 djara + 3 salades |
-| Menu pour 4 | 24,000 XAF | 8 morceaux + 8 ailes + 4 frites + 4 djara + 4 salades |
-
----
-
-## Development
-
-### Run everything at once (requires `concurrently`)
+- Node.js 18+
+- MongoDB running locally
 
 ```bash
-npm install -g concurrently
+# Terminal 1 — API
+cd api && npm install && npm run dev
 
-concurrently \
-  "cd api && npm run dev" \
-  "cd agent && npm run dev" \
-  "cd chat-ui && npm run dev"
+# Terminal 2 — Agent
+cd agent && npm install && npm run dev
+
+# Terminal 3 — Chat UI
+cd chat-ui && npm install && npm run dev
+
+# Terminal 4 — Admin UI
+cd admin-ui && npm install && npm run dev
 ```
 
-### Environment variables
+| Service | URL |
+|---------|-----|
+| API | http://localhost:3001 |
+| Agent | http://localhost:3000 |
+| Chat UI | http://localhost:5173 |
+| Admin UI | http://localhost:5174 |
 
-**api/.env**
-```
-MONGODB_URI=mongodb://localhost:27017/restaurant
+---
+
+## Environment Variables
+
+**`api/.env`**
+```env
+MONGODB_URI=mongodb://localhost:27017/tchopetyamo
 PORT=3001
+JWT_SECRET=restaurant-admin-secret
+LOG_LEVEL=info
 ```
 
-**agent/.env**
-```
+**`agent/.env`**
+```env
 ANTHROPIC_API_KEY=sk-ant-...
 MCP_SERVER_PATH=../mcp-server/index.js
 API_URL=http://localhost:3001
@@ -294,9 +266,20 @@ PORT=3000
 
 ---
 
+## Menu Categories
+
+`BEIGNETS` · `SALADES` · `BOISSON` · `POULETS` · `BURGER` · `MENUS_COMPOSES`
+
+---
+
 ## Tech Stack
 
-- **API:** Express.js, Mongoose, MongoDB
-- **MCP Server:** `@modelcontextprotocol/sdk`, node-fetch
-- **Agent:** Anthropic SDK (`claude-opus-4-5`), MCP Client, Express.js
-- **Chat UI:** Vue 3, Pinia, Vite, Axios
+| Layer | Technology |
+|-------|-----------|
+| Database | MongoDB + Mongoose |
+| API | Express.js, JWT, bcryptjs, Pino, Prometheus |
+| AI Agent | Anthropic SDK (Claude), MCP Client |
+| MCP Server | `@modelcontextprotocol/sdk` |
+| Chat UI | Vue 3, Pinia, Vite, vue-i18n |
+| Admin UI | Vue 3, Pinia, Vue Router, Chart.js, Tailwind CSS, vue-i18n |
+| Infrastructure | Docker Compose, nginx (multi-stage builds) |
