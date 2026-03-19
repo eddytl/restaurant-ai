@@ -95,16 +95,38 @@ IMAGE DISPLAY RULE (only when showing menu items to the user):
 
 You represent the warmth and hospitality of Cameroonian culture. Bienvenue chez Restaurant!`;
 
-function getSystemPrompt(language, customerProfile = null) {
+// Returns system prompt as content blocks.
+// BASE_SYSTEM_PROMPT is marked cache_control so Anthropic caches it server-side
+// after the first call — subsequent turns pay ~10% of normal input token cost for it.
+function getSystemPromptBlocks(language, customerProfile = null) {
   const defaultLang = language === 'en' ? 'English' : 'French';
   const langInstruction = `\n\nLANGUAGE RULE: The user's preferred language is ${defaultLang}. Always respond in the same language the user writes in. If the user writes in French, respond in French. If the user writes in English, respond in English. If the user writes in another language, respond in that language. When the user's message is ambiguous or very short (e.g. "ok", "yes"), default to ${defaultLang}.`;
   const customerInstruction = customerProfile?.name
     ? `\n\nKNOWN CUSTOMER: Name: ${customerProfile.name}, Phone: ${customerProfile.phone}. Never ask for their name or phone number — use this information directly when placing orders.`
     : '';
-  return BASE_SYSTEM_PROMPT + langInstruction + customerInstruction;
+
+  const blocks = [
+    // Static block — cached after first call
+    { type: 'text', text: BASE_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }
+  ];
+  // Dynamic block — language + customer profile (small, not worth caching)
+  const dynamic = langInstruction + customerInstruction;
+  if (dynamic) blocks.push({ type: 'text', text: dynamic });
+  return blocks;
 }
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Add cache_control to the last tool so the entire tools array is cached too
+function getCachedTools() {
+  if (!anthropicTools.length) return undefined;
+  return anthropicTools.map((t, i) =>
+    i === anthropicTools.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t
+  );
+}
+
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' }
+});
 
 // Async queue — limits concurrent Claude API calls to prevent overload
 // concurrency: max parallel Claude calls; max queue size beyond that returns 429
@@ -337,18 +359,61 @@ function stripImageUrls(content) {
   });
 }
 
+// Replace old get_menu tool_result bodies with a 1-line summary.
+// The full menu JSON can be ~1000 tokens — keeping stale copies wastes context.
+// We keep only the LAST get_menu result intact so Claude can still reference it.
+function compressOldMenuResults(messages) {
+  // Find all indices where a tool_result for get_menu appears
+  const menuResultIndices = [];
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg.role === 'user' && Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (block.type === 'tool_result' && block._toolName === 'get_menu') {
+          menuResultIndices.push(i);
+        }
+      }
+    }
+  }
+  if (menuResultIndices.length <= 1) return messages; // nothing to compress
+
+  // Compress all but the last get_menu result
+  const toCompress = new Set(menuResultIndices.slice(0, -1));
+  return messages.map((msg, i) => {
+    if (!toCompress.has(i)) return msg;
+    return {
+      ...msg,
+      content: msg.content.map((block) => {
+        if (block.type === 'tool_result' && block._toolName === 'get_menu') {
+          return { ...block, content: '[Menu already fetched — see earlier display]' };
+        }
+        return block;
+      })
+    };
+  });
+}
+
 // Option A: rolling window — only send the last MAX_API_MESSAGES to Claude
 const MAX_API_MESSAGES = 16;
 function truncateForApi(messages) {
-  if (messages.length <= MAX_API_MESSAGES) return messages;
-  let start = messages.length - MAX_API_MESSAGES;
-  // Ensure we start on a user message with plain string content (not a tool_result block)
-  while (start < messages.length) {
-    const msg = messages[start];
-    if (msg.role === 'user' && typeof msg.content === 'string') break;
-    start++;
-  }
-  return messages.slice(start);
+  const compressed = compressOldMenuResults(messages);
+  const windowed = compressed.length <= MAX_API_MESSAGES ? compressed : (() => {
+    let start = compressed.length - MAX_API_MESSAGES;
+    while (start < compressed.length) {
+      const msg = compressed[start];
+      if (msg.role === 'user' && typeof msg.content === 'string') break;
+      start++;
+    }
+    return compressed.slice(start);
+  })();
+  // Strip internal _toolName tags before sending to Claude
+  return windowed.map((msg) => {
+    if (!Array.isArray(msg.content)) return msg;
+    return {
+      ...msg,
+      content: msg.content.map(({ _toolName, ...block }) => block)
+    };
+  });
 }
 
 // ─── Error helper ───────────────────────────────────────────────────────────
@@ -473,9 +538,9 @@ app.post('/api/chat/stream', async (req, res) => {
         const stream = anthropic.messages.stream({
           model: 'claude-haiku-4-5-20251001',
           max_tokens: 4096,
-          system: getSystemPrompt(language, customerProfile),
+          system: getSystemPromptBlocks(language, customerProfile),
           messages: truncateForApi(session.messages),
-          ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {})
+          tools: getCachedTools()
         });
 
         stream.on('text', (text) => {
@@ -484,8 +549,11 @@ app.post('/api/chat/stream', async (req, res) => {
         });
 
         const finalMessage = await stream.finalMessage();
-        const { input_tokens, output_tokens } = finalMessage.usage;
-        logger.info({ turn: iterations, in: input_tokens, out: output_tokens, total: input_tokens + output_tokens, queueSize: claudeQueue.size, queuePending: claudeQueue.pending }, 'Claude tokens');
+        const usage = finalMessage.usage;
+        const { input_tokens, output_tokens } = usage;
+        const cache_read = usage.cache_read_input_tokens ?? 0;
+        const cache_write = usage.cache_creation_input_tokens ?? 0;
+        logger.info({ turn: iterations, in: input_tokens, out: output_tokens, cache_read, cache_write, total: input_tokens + output_tokens, queueSize: claudeQueue.size }, 'Claude tokens');
         claudeTokensTotal.inc({ direction: 'in' }, input_tokens);
         claudeTokensTotal.inc({ direction: 'out' }, output_tokens);
         queueSize.set(claudeQueue.size);
@@ -508,7 +576,8 @@ app.post('/api/chat/stream', async (req, res) => {
               const raw = (result.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
                 || JSON.stringify(result);
               const text = processToolResult(toolUse.name, raw);
-              toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: text });
+              // _toolName is a local tag used by compressOldMenuResults — not sent to Claude
+              toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: text, _toolName: toolUse.name });
               if (toolUse.name === 'create_order' && toolUse.input?.customerName) {
                 send({ type: 'customer_identified', name: toolUse.input.customerName, phone: toolUse.input.customerPhone || '' });
               }
@@ -535,8 +604,9 @@ app.post('/api/chat/stream', async (req, res) => {
 // ─── Non-streaming chat (kept for compatibility) ─────────────────────────────
 
 app.post('/api/chat', async (req, res) => {
+  const language = req.body?.language || 'fr';
   try {
-    const { message, sessionId: existingId, language = 'fr' } = req.body;
+    const { message, sessionId: existingId } = req.body;
     if (!message?.trim()) return res.status(400).json({ success: false, message: 'Message is required' });
 
     let sessionId = existingId;
@@ -554,9 +624,10 @@ app.post('/api/chat', async (req, res) => {
     let response, iterations = 0;
     while (iterations++ < 10) {
       response = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001', max_tokens: 4096, system: getSystemPrompt(language),
+        model: 'claude-haiku-4-5-20251001', max_tokens: 4096,
+        system: getSystemPromptBlocks(language),
         messages: truncateForApi(session.messages),
-        ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {})
+        tools: getCachedTools()
       });
       session.messages.push({ role: 'assistant', content: stripImageUrls(response.content) });
 
@@ -568,7 +639,7 @@ app.post('/api/chat', async (req, res) => {
             const r = await callMCPTool(t.name, t.input);
             const raw = (r.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
             const text = processToolResult(t.name, raw);
-            toolResults.push({ type: 'tool_result', tool_use_id: t.id, content: text });
+            toolResults.push({ type: 'tool_result', tool_use_id: t.id, content: text, _toolName: t.name });
           } catch (err) {
             toolResults.push({ type: 'tool_result', tool_use_id: t.id, content: JSON.stringify({ error: err.message }), is_error: true });
           }
