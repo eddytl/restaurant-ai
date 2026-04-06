@@ -6,7 +6,10 @@
     "customers": "Clients",
     "conversations": "Conversations",
     "branches": "Agences",
-    "users": "Utilisateurs"
+    "users": "Utilisateurs",
+    "insights": "Alertes & Actions",
+    "adminChat": "Chat",
+    "agentIA": "Agent IA"
   },
   "common": {
     "save": "Enregistrer",
@@ -144,6 +147,24 @@
     "deleteConfirm": "Supprimer cette agence ?",
     "deleteMessage": "sera définitivement supprimée.",
     "noBranches": "Aucune agence trouvée"
+  },
+  "adminChat": {
+    "title": "Chat",
+    "subtitle": "Posez vos questions sur les données du restaurant en temps réel",
+    "placeholder": "Posez une question…",
+    "hint": "Entrée pour envoyer · Maj+Entrée pour une nouvelle ligne",
+    "emptyTitle": "Discutez avec votre agent IA",
+    "emptySubtitle": "L'agent a accès en temps réel aux commandes, clients, menu et agences. Posez-lui n'importe quelle question."
+  },
+  "insights": {
+    "title": "Alertes & Actions",
+    "subtitle": "Alertes business et actions correctives générées par IA",
+    "allBranches": "Toutes les agences",
+    "generate": "Analyser",
+    "generating": "Analyse en cours…",
+    "placeholder": "Sélectionnez une agence et cliquez sur Analyser pour obtenir les alertes business.",
+    "emptyTitle": "Aucune alerte générée",
+    "errorPrefix": "Erreur :"
   },
   "users": {
     "title": "Utilisateurs",

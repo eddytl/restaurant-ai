@@ -1,6 +1,8 @@
 <script setup>
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-defineProps({
+
+const props = defineProps({
   collapsed: { type: Boolean, default: false },
   navItems:  { type: Array,   default: () => [] },
   isActive:  { type: Function, default: () => false },
@@ -9,33 +11,56 @@ defineProps({
 })
 defineEmits(['navigate', 'toggleCollapse', 'logout'])
 const { t } = useI18n()
+
+// Groups that are open — default open any group whose child is active
+const openGroups = ref(new Set())
+
+function initGroups() {
+  for (const item of props.navItems) {
+    if (item.group && item.children?.some(c => props.isActive(c.to))) {
+      openGroups.value.add(item.name)
+    }
+  }
+  // Default open all groups if none are active yet
+  if (openGroups.value.size === 0) {
+    for (const item of props.navItems) {
+      if (item.group) openGroups.value.add(item.name)
+    }
+  }
+}
+
+initGroups()
+
+// Re-open groups when nav items change (language switch)
+watch(() => props.navItems, () => { openGroups.value = new Set(); initGroups() })
+
+function toggleGroup(name) {
+  if (openGroups.value.has(name)) openGroups.value.delete(name)
+  else openGroups.value.add(name)
+}
+
+function isGroupActive(item) {
+  return item.children?.some(c => props.isActive(c.to))
+}
 </script>
 
 <template>
   <!-- Logo row -->
   <div class="border-b border-gray-100 dark:border-gray-800 shrink-0">
-
     <!-- COLLAPSED: logo icon IS the expand button -->
-    <button
-      v-if="collapsed"
-      @click="$emit('toggleCollapse')"
-      title="Développer le menu"
-      class="w-full py-4 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-    >
+    <button v-if="collapsed" @click="$emit('toggleCollapse')" title="Développer le menu"
+      class="w-full py-4 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
       <div class="w-9 h-9 bg-brand-600 rounded-xl flex items-center justify-center shrink-0">
-       <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="14" cy="14" r="14" fill="#8b1a1a"/>
-              <!-- Plate -->
-              <ellipse cx="14" cy="17" rx="8" ry="3" fill="white" opacity="0.15"/>
-              <ellipse cx="14" cy="17" rx="8" ry="3" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
-              <!-- Food dome -->
-              <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="white" opacity="0.22"/>
-              <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
-              <!-- Steam lines -->
-              <path d="M11 8.5 Q10.5 7 11 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
-              <path d="M14 8 Q13.5 6.5 14 5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
-              <path d="M17 8.5 Q16.5 7 17 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
-            </svg>
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="14" cy="14" r="14" fill="#8b1a1a"/>
+          <ellipse cx="14" cy="17" rx="8" ry="3" fill="white" opacity="0.15"/>
+          <ellipse cx="14" cy="17" rx="8" ry="3" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
+          <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="white" opacity="0.22"/>
+          <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
+          <path d="M11 8.5 Q10.5 7 11 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+          <path d="M14 8 Q13.5 6.5 14 5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+          <path d="M17 8.5 Q16.5 7 17 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+        </svg>
       </div>
     </button>
 
@@ -43,36 +68,28 @@ const { t } = useI18n()
     <div v-else class="px-4 py-4 flex items-center justify-between">
       <div class="flex items-center gap-3 min-w-0">
         <div class="w-9 h-9 bg-brand-600 rounded-xl flex items-center justify-center shrink-0">
-         <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="14" cy="14" r="14" fill="#8b1a1a"/>
-              <!-- Plate -->
-              <ellipse cx="14" cy="17" rx="8" ry="3" fill="white" opacity="0.15"/>
-              <ellipse cx="14" cy="17" rx="8" ry="3" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
-              <!-- Food dome -->
-              <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="white" opacity="0.22"/>
-              <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
-              <!-- Steam lines -->
-              <path d="M11 8.5 Q10.5 7 11 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
-              <path d="M14 8 Q13.5 6.5 14 5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
-              <path d="M17 8.5 Q16.5 7 17 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
-            </svg>
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="14" cy="14" r="14" fill="#8b1a1a"/>
+            <ellipse cx="14" cy="17" rx="8" ry="3" fill="white" opacity="0.15"/>
+            <ellipse cx="14" cy="17" rx="8" ry="3" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
+            <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="white" opacity="0.22"/>
+            <path d="M6 17 Q6 10 14 10 Q22 10 22 17" fill="none" stroke="white" stroke-width="1.2" opacity="0.9"/>
+            <path d="M11 8.5 Q10.5 7 11 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+            <path d="M14 8 Q13.5 6.5 14 5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+            <path d="M17 8.5 Q16.5 7 17 5.5" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+          </svg>
         </div>
         <div class="min-w-0 overflow-hidden">
           <p class="text-sm font-bold text-gray-900 dark:text-gray-100 whitespace-nowrap">Restaurant</p>
           <p class="text-xs text-gray-500 dark:text-gray-500 whitespace-nowrap">Admin Panel</p>
         </div>
       </div>
-
-      <button
-        @click="$emit('toggleCollapse')"
+      <button @click="$emit('toggleCollapse')"
         :title="mobile ? 'Fermer' : 'Réduire le menu'"
-        class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors shrink-0 p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-      >
-        <!-- Mobile: X -->
+        class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors shrink-0 p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800">
         <svg v-if="mobile" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
         </svg>
-        <!-- Desktop: collapse left -->
         <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/>
         </svg>
@@ -88,28 +105,76 @@ const { t } = useI18n()
     </p>
     <div v-else class="pt-3" />
 
-    <button
-      v-for="item in navItems"
-      :key="item.to"
-      @click="$emit('navigate', item.to)"
-      :title="collapsed ? item.name : undefined"
-      :class="['sidebar-link w-full', isActive(item.to) ? 'active' : '',
-        collapsed ? 'justify-center !px-0' : '']"
-    >
-      <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon"/>
-      </svg>
-      <Transition
-        enter-active-class="transition-all duration-150 overflow-hidden"
-        enter-from-class="opacity-0 w-0"
-        enter-to-class="opacity-100"
-        leave-active-class="transition-all duration-100 overflow-hidden"
-        leave-from-class="opacity-100"
-        leave-to-class="opacity-0 w-0"
-      >
-        <span v-if="!collapsed" class="whitespace-nowrap overflow-hidden">{{ item.name }}</span>
-      </Transition>
-    </button>
+    <template v-for="item in navItems" :key="item.to || item.name">
+
+      <!-- ── Group item ── -->
+      <template v-if="item.group">
+        <!-- Group header -->
+        <button @click="!collapsed && toggleGroup(item.name)"
+          :title="collapsed ? item.name : undefined"
+          :class="['sidebar-link w-full', isGroupActive(item) ? 'active' : '',
+            collapsed ? 'justify-center !px-0' : 'justify-between']">
+          <div class="flex items-center gap-2 min-w-0">
+            <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon"/>
+            </svg>
+            <Transition enter-active-class="transition-all duration-150 overflow-hidden" enter-from-class="opacity-0 w-0" enter-to-class="opacity-100"
+              leave-active-class="transition-all duration-100 overflow-hidden" leave-from-class="opacity-100" leave-to-class="opacity-0 w-0">
+              <span v-if="!collapsed" class="whitespace-nowrap overflow-hidden font-medium">{{ item.name }}</span>
+            </Transition>
+          </div>
+          <!-- Chevron -->
+          <Transition enter-active-class="transition-all duration-150 overflow-hidden" enter-from-class="opacity-0 w-0" enter-to-class="opacity-100"
+            leave-active-class="transition-all duration-100 overflow-hidden" leave-from-class="opacity-100" leave-to-class="opacity-0 w-0">
+            <svg v-if="!collapsed" class="w-4 h-4 shrink-0 transition-transform duration-200 text-gray-400"
+              :class="openGroups.has(item.name) ? 'rotate-180' : ''"
+              fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </Transition>
+        </button>
+
+        <!-- Children -->
+        <div v-if="!collapsed && openGroups.has(item.name)" class="ml-3 pl-3 border-l border-gray-100 dark:border-gray-800 space-y-0.5 mt-0.5">
+          <button v-for="child in item.children" :key="child.to"
+            @click="$emit('navigate', child.to)"
+            :class="['sidebar-link w-full text-sm', isActive(child.to) ? 'active' : '']">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="child.icon"/>
+            </svg>
+            <span class="whitespace-nowrap overflow-hidden">{{ child.name }}</span>
+          </button>
+        </div>
+
+        <!-- Collapsed: show children icons stacked -->
+        <template v-if="collapsed">
+          <button v-for="child in item.children" :key="child.to"
+            @click="$emit('navigate', child.to)"
+            :title="child.name"
+            :class="['sidebar-link w-full justify-center !px-0', isActive(child.to) ? 'active' : '']">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="child.icon"/>
+            </svg>
+          </button>
+        </template>
+      </template>
+
+      <!-- ── Regular item ── -->
+      <button v-else
+        @click="$emit('navigate', item.to)"
+        :title="collapsed ? item.name : undefined"
+        :class="['sidebar-link w-full', isActive(item.to) ? 'active' : '',
+          collapsed ? 'justify-center !px-0' : '']">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon"/>
+        </svg>
+        <Transition enter-active-class="transition-all duration-150 overflow-hidden" enter-from-class="opacity-0 w-0" enter-to-class="opacity-100"
+          leave-active-class="transition-all duration-100 overflow-hidden" leave-from-class="opacity-100" leave-to-class="opacity-0 w-0">
+          <span v-if="!collapsed" class="whitespace-nowrap overflow-hidden">{{ item.name }}</span>
+        </Transition>
+      </button>
+
+    </template>
   </nav>
 
   <!-- User / Logout -->
@@ -118,24 +183,15 @@ const { t } = useI18n()
       <div class="w-8 h-8 rounded-full bg-brand-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
         {{ (user?.name || 'A')[0].toUpperCase() }}
       </div>
-      <Transition
-        enter-active-class="transition-all duration-150 overflow-hidden"
-        enter-from-class="opacity-0 w-0"
-        enter-to-class="opacity-100"
-        leave-active-class="transition-all duration-100 overflow-hidden"
-        leave-from-class="opacity-100"
-        leave-to-class="opacity-0 w-0"
-      >
+      <Transition enter-active-class="transition-all duration-150 overflow-hidden" enter-from-class="opacity-0 w-0" enter-to-class="opacity-100"
+        leave-active-class="transition-all duration-100 overflow-hidden" leave-from-class="opacity-100" leave-to-class="opacity-0 w-0">
         <div v-if="!collapsed" class="flex-1 min-w-0 overflow-hidden">
           <p class="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate whitespace-nowrap">{{ user?.name || 'Admin' }}</p>
           <p class="text-xs text-gray-500 dark:text-gray-500 truncate whitespace-nowrap">{{ user?.email || '' }}</p>
         </div>
       </Transition>
-      <button
-        @click="$emit('logout')"
-        :class="['text-gray-400 hover:text-red-500 transition-colors shrink-0', collapsed ? '' : '']"
-        title="Déconnexion"
-      >
+      <button @click="$emit('logout')" title="Déconnexion"
+        class="text-gray-400 hover:text-red-500 transition-colors shrink-0">
         <svg :class="collapsed ? 'w-4 h-4' : 'w-5 h-5'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
             d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>

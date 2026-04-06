@@ -6,7 +6,10 @@
     "customers": "Customers",
     "conversations": "Conversations",
     "branches": "Branches",
-    "users": "Users"
+    "users": "Users",
+    "insights": "Alerts & Actions",
+    "adminChat": "Chat",
+    "agentIA": "AI Agent"
   },
   "common": {
     "save": "Save",
@@ -144,6 +147,28 @@
     "deleteConfirm": "Delete this branch?",
     "deleteMessage": "will be permanently deleted.",
     "noBranches": "No branches found"
+  },
+  "adminChat": {
+    "title": "AI Agent",
+    "subtitle": "Ask questions about your restaurant data in real time",
+    "placeholder": "Ask a question…",
+    "hint": "Enter to send · Shift+Enter for a new line",
+    "emptyTitle": "Chat with your AI agent",
+    "emptySubtitle": "The agent has real-time access to orders, customers, menu and branches. Ask it anything."
+  },
+  "insights": {
+    "title": "AI Insights",
+    "subtitle": "AI-generated recommendations based on your data",
+    "allBranches": "All branches",
+    "generate": "Generate insights",
+    "generating": "Generating…",
+    "placeholder": "Select a branch (optional) and click \"Generate\" to get AI-powered recommendations.",
+    "errorPrefix": "Error:",
+    "chatTitle": "Chat with the agent",
+    "chatPlaceholder": "Ask a question about your data…",
+    "chatSend": "Send",
+    "chatEmpty": "Ask the AI agent a question. It has real-time access to all restaurant data.",
+    "chatClear": "Clear"
   },
   "users": {
     "title": "Users",
