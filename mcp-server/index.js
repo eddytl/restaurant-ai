@@ -63,6 +63,24 @@ const tools = [
     }
   },
   {
+    name: 'save_customer_details',
+    description: 'Save the customer\'s name and phone number for the current session. Call this IMMEDIATELY whenever the customer provides their name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        customerName: {
+          type: 'string',
+          description: 'Full name of the customer'
+        },
+        customerPhone: {
+          type: 'string',
+          description: 'Phone number of the customer'
+        }
+      },
+      required: ['customerName']
+    }
+  },
+  {
     name: 'create_order',
     description:
       'Place a new order at Restaurant restaurant. Requires customer name and at least one menu item.',
@@ -108,7 +126,7 @@ const tools = [
           description: 'The MongoDB ID of the branch (agence) the customer chose. Required — always call get_branches first if unknown.'
         }
       },
-      required: ['customerName', 'items', 'branchId']
+      required: ['customerName', 'items', 'branchId', 'deliveryAddress']
     }
   },
   {
@@ -230,6 +248,10 @@ async function resolveMenuItemId(idx) {
   return res.data._id;
 }
 
+async function handleSaveCustomerDetails(input) {
+  return { success: true, message: `Customer details saved for ${input.customerName}.` };
+}
+
 async function handleCreateOrder(input) {
   const resolvedItems = await Promise.all(
     input.items.map(async ({ menuItemIdx, quantity }) => ({
@@ -313,6 +335,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case 'get_branches':
         result = await handleGetBranches();
+        break;
+      case 'save_customer_details':
+        result = await handleSaveCustomerDetails(request.params.arguments);
         break;
       case 'get_menu':
         result = await handleGetMenu(args || {});

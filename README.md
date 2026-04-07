@@ -41,7 +41,7 @@ Admin    → Admin UI ───────────────────�
 ### Prerequisites
 
 - Docker & Docker Compose
-- An Anthropic API key
+- LM Studio (with a loaded model)
 
 ### 1 — Configure environment
 
@@ -52,7 +52,8 @@ PORT=3001
 JWT_SECRET=your-secret-key
 
 # agent/.env
-ANTHROPIC_API_KEY=sk-ant-...
+LMSTUDIO_SERVER_URL=ws://host.docker.internal:1234
+LMSTUDIO_MODEL_PATH=your-model-path-here
 API_URL=http://api:3001
 PORT=3000
 ```
@@ -258,7 +259,8 @@ LOG_LEVEL=info
 
 **`agent/.env`**
 ```env
-ANTHROPIC_API_KEY=sk-ant-...
+LMSTUDIO_SERVER_URL=ws://host.docker.internal:1234
+LMSTUDIO_MODEL_PATH=your-model-path-here
 MCP_SERVER_PATH=../mcp-server/index.js
 API_URL=http://localhost:3001
 PORT=3000
@@ -278,7 +280,7 @@ PORT=3000
 |-------|-----------|
 | Database | MongoDB + Mongoose |
 | API | Express.js, JWT, bcryptjs, Pino, Prometheus |
-| AI Agent | Anthropic SDK (Claude), MCP Client |
+| AI Agent | LM Studio SDK, MCP Client |
 | MCP Server | `@modelcontextprotocol/sdk` |
 | Chat UI | Vue 3, Pinia, Vite, vue-i18n |
 | Admin UI | Vue 3, Pinia, Vue Router, Chart.js, Tailwind CSS, vue-i18n |

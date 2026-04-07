@@ -50,7 +50,7 @@ if (process.env.REDIS_URL) {
   });
 }
 import { v4 as uuidv4 } from 'uuid';
-import Anthropic from '@anthropic-ai/sdk';
+import { LMStudioClient } from "@lmstudio/sdk";
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { fileURLToPath } from 'url';
@@ -63,80 +63,138 @@ const PORT = process.env.PORT || 3000;
 const MCP_SERVER_PATH = process.env.MCP_SERVER_PATH || path.join(__dirname, '../mcp-server/index.js');
 const API_URL = process.env.API_URL || 'http://localhost:3001';
 
-const BASE_SYSTEM_PROMPT = `You are a helpful AI assistant for Restaurant, a wonderful Cameroonian restaurant. Your name is Yamo.
+const BASE_SYSTEM_PROMPT = `You are Yamo, a helpful AI assistant for Restaurant.
+KNOWLEDGE BASE:
+- Use the OFFICIAL MENU DATA provided below to respond to menu queries.
+- ALWAYS use the EXACT 'idx' value from the data for the [image:menu:IDX] token.
+- NEVER name or price items from memory. If an item is not in the data, you may call get_menu to search for it.
 
-Your role is to help customers:
-- Browse and explore the menu (categories: Beignets, Salades, Boisson, Poulets, Burger, Menus Composés)
-- Get details about specific dishes and their prices
-- Place new orders
-- Check order status
-- Update or cancel existing orders
+IMAGE DISPLAY RULE (CRITICAL for grid layout):
+- Display EACH item using this EXACT format (Image line FIRST):
+[image:menu:IDX]
+**Item Name** — Price XAF
+
+- EXAMPLE (if data has idx 20 for Poulet braisé):
+## Poulets
+[image:menu:20]
+**Poulet braisé** — 2,800 XAF
+
+Rules:
+- The [image:menu:IDX] line MUST come BEFORE the name/price.
+- Use ## for category headings.
+- NEVER use bullet points (-) or tables for the menu.
+- NEVER mention the 'idx' number in your natural language text (e.g., don't write "Poulet (idx:20)"). The ID is only for the [image:menu:IDX] tag.
 
 Guidelines:
-- Always be friendly, warm, and helpful
-- When a customer wants to place an order, ALWAYS confirm the full order details (items, quantities, total amount) before creating it
-- Before placing an order, you need the customer's name AND phone number. Check the conversation history first:
-  - If the customer already provided their name and phone earlier in the conversation, use them directly — do NOT ask again
-  - If only one is missing, ask only for the missing piece
-  - If neither has been provided, ask for both
-  - When reusing known details, confirm them briefly: "Je passe la commande avec vos coordonnées : [Nom], [Téléphone]. C'est bien ça ?"
-- The currency is XAF (Central African Franc / Franc CFA)
-- Format prices clearly (e.g., "1,500 XAF" or "XAF 1,500")
-- If an item is marked as unavailable (épuisé), inform the customer politely and suggest alternatives
-- Be concise but informative
-- To place an order, use create_order directly with the menuItemIdx values the customer chose — NEVER call get_menu just to place an order
-- Always provide order IDs to customers so they can track their orders
-- When cancelling 2 or more orders, ALWAYS use cancel_orders_bulk (one call) instead of cancel_order one by one
-
-BRANCH (AGENCE) RULE:
-- Before placing any order, you MUST know which branch (agence) the customer wants to order from.
-- If the customer hasn't mentioned a branch yet, call get_branches to list available branches, then ask the customer to choose one.
-- Once the customer picks a branch, remember it for the entire conversation — do NOT ask again.
-- Always pass the chosen branch's _id as branchId when calling create_order.
-
-IMAGE DISPLAY RULE (only when showing menu items to the user):
-- Call get_menu first — idx values are not preserved in conversation history after display.
-- After getting the tool response, display EACH item using EXACTLY this two-line format:
-[image:menu:IDX]
-**Actual Item Name** — Actual Price XAF
-
-  Where IDX is the idx field from the tool response. Group items under a ## Category heading.
-- NEVER use tables, bullet points, or plain bold text to list menu items. ALWAYS use the two-line image+name format above.
+- Always be friendly and warm.
+- Confirm order details before creating them.
+- ALWAYS provide the Order ID to the customer immediately after a successful order creation (the ID is returned by the tool).
+- If the customer wants to place an order, you MUST ask them to choose an Agence (Branch) and provide a Delivery Address. Do NOT ask for this if they are just chatting or asking questions.
+- When a customer wants to update or cancel an order, you MUST ask for their Order ID first. Do NOT attempt to update or cancel without an ID.
+- Use cancel_orders_bulk for multiple cancellations.
 
 You represent the warmth and hospitality of Cameroonian culture. Bienvenue chez Restaurant!`;
 
 // Returns system prompt as content blocks.
 // BASE_SYSTEM_PROMPT is marked cache_control so Anthropic caches it server-side
 // after the first call — subsequent turns pay ~10% of normal input token cost for it.
-function getSystemPromptBlocks(language, customerProfile = null) {
+let menuCache = null;
+let lastMenuFetch = 0;
+const MENU_TTL = 300000; // 5 minutes
+
+async function getFullMenu() {
+  if (menuCache && (Date.now() - lastMenuFetch < MENU_TTL)) return menuCache;
+  try {
+    const res = await globalThis.fetch(`${API_URL}/api/menu`);
+    const data = await res.json();
+    if (data.success && Array.isArray(data.data)) {
+      menuCache = data.data.map(item => ({
+        idx: item.idx,
+        name: item.name,
+        price: item.price,
+        category: item.category?.name || item.category,
+        available: item.available
+      }));
+      lastMenuFetch = Date.now();
+      return menuCache;
+    }
+  } catch (err) {
+    logger.warn({ err: err.message }, 'Failed to fetch menu for prompt injection');
+  }
+  return menuCache || [];
+}
+
+let branchCache = null;
+let lastBranchFetch = 0;
+
+async function getFullBranches() {
+  if (branchCache && (Date.now() - lastBranchFetch < MENU_TTL)) return branchCache;
+  try {
+    const res = await globalThis.fetch(`${API_URL}/api/branches`);
+    const data = await res.json();
+    if (data.success && Array.isArray(data.data)) {
+      branchCache = data.data.map(b => ({
+        id: b._id,
+        name: b.name,
+        location: b.location
+      }));
+      lastBranchFetch = Date.now();
+      return branchCache;
+    }
+  } catch (err) {
+    logger.warn({ err: err.message }, 'Failed to fetch branches for prompt injection');
+  }
+  return branchCache || [];
+}
+
+async function getSystemPromptBlocks(language, customerProfile = null) {
+  const [menu, branches] = await Promise.all([getFullMenu(), getFullBranches()]);
+  
+  const menuList = menu.map(m => `[image:menu:${m.idx}]\n**${m.name}** — ${m.price} XAF\nCat: ${m.category}${m.available ? '' : ' [EPUISÉ]'}`).join('\n\n');
+  const branchList = branches.map(b => `- ${b.name} (ID: ${b.id}) - ${b.location}`).join('\n');
+  
+  const menuKnowledge = `\n\nOFFICIAL MENU DATA:\n${menuList}\n\n`;
+  const branchKnowledge = `\n\nOFFICIAL BRANCHES (AGENCES):\n${branchList}\n\n`;
+
   const defaultLang = language === 'en' ? 'English' : 'French';
   const langInstruction = `\n\nLANGUAGE RULE: The user's preferred language is ${defaultLang}. Always respond in the same language the user writes in. If the user writes in French, respond in French. If the user writes in English, respond in English. If the user writes in another language, respond in that language. When the user's message is ambiguous or very short (e.g. "ok", "yes"), default to ${defaultLang}.`;
+  
   const customerInstruction = customerProfile?.name
-    ? `\n\nKNOWN CUSTOMER: Name: ${customerProfile.name}, Phone: ${customerProfile.phone}. Never ask for their name or phone number — use this information directly when placing orders.`
+    ? `\n\nCUSTOMER INFO: You are currently talking to ${customerProfile.name} (Phone: ${customerProfile.phone}). You MUST address them by their name: ${customerProfile.name}. If they ask "tu connais mon nom" or "quel est mon nom", you MUST reply "Oui, vous êtes ${customerProfile.name}!"`
     : '';
 
-  const blocks = [
-    // Static block — cached after first call
-    { type: 'text', text: BASE_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }
-  ];
-  // Dynamic block — language + customer profile (small, not worth caching)
-  const dynamic = langInstruction + customerInstruction;
-  if (dynamic) blocks.push({ type: 'text', text: dynamic });
-  return blocks;
+  const dynamic = menuKnowledge + branchKnowledge + langInstruction + customerInstruction;
+  return BASE_SYSTEM_PROMPT + dynamic;
 }
 
-// Add cache_control to the last tool so the entire tools array is cached too
-function getCachedTools() {
-  if (!anthropicTools.length) return undefined;
-  return anthropicTools.map((t, i) =>
-    i === anthropicTools.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t
-  );
-}
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  defaultHeaders: { 'anthropic-beta': 'prompt-caching-2024-07-31' }
+const client = new LMStudioClient({
+  baseUrl: process.env.LMSTUDIO_SERVER_URL || "ws://localhost:1234",
 });
+
+let model = null;
+async function loadModel() {
+  let modelPath = (process.env.LMSTUDIO_MODEL_PATH || '').trim();
+  const loadedModels = await client.llm.listLoaded();
+
+  if (!modelPath) {
+    logger.warn('LMSTUDIO_MODEL_PATH not set, attempting to use the first loaded model');
+    if (loadedModels.length > 0) {
+      model = await client.llm.model(loadedModels[0].path || loadedModels[0].identifier);
+    } else {
+      throw new Error("No models loaded in LM Studio and LMSTUDIO_MODEL_PATH is not set.");
+    }
+  } else {
+    // Try to find the model by identifier or path among loaded models
+    const targetModel = loadedModels.find(m => m.identifier === modelPath || m.path === modelPath);
+    if (targetModel) {
+      model = await client.llm.model(targetModel.path || targetModel.identifier);
+    } else {
+      logger.warn({ modelPath, loaded: loadedModels.map(m => ({ identifier: m.identifier, path: m.path })) }, 'Specified model not found among loaded models, attempting to load directly');
+      model = await client.llm.model(modelPath);
+    }
+  }
+  logger.info({ model: model.path || model.id }, 'LM Studio model loaded');
+}
 
 // Async queue — limits concurrent Claude API calls to prevent overload
 // concurrency: max parallel Claude calls; max queue size beyond that returns 429
@@ -264,14 +322,17 @@ async function initMCP() {
       args: [MCP_SERVER_PATH],
       env: { ...process.env, API_URL }
     });
-    mcpClient = new Client({ name: 'tchopetyamo-agent', version: '1.0.0' }, { capabilities: {} });
+    mcpClient = new Client({ name: 'restaurant-agent', version: '1.0.0' }, { capabilities: {} });
     await mcpClient.connect(transport);
 
     const { tools } = await mcpClient.listTools();
     anthropicTools = tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      input_schema: t.inputSchema
+      type: 'function',
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.inputSchema
+      }
     }));
     logger.info({ tools: tools.map((t) => t.name) }, 'MCP ready');
   } catch (err) {
@@ -315,7 +376,7 @@ function processMenuToolResult(rawText) {
       });
       return JSON.stringify(data);
     }
-  } catch {}
+  } catch { }
   return rawText;
 }
 
@@ -345,7 +406,7 @@ function processOrderToolResult(rawText) {
       data.data = compressOrder(data.data);
       return JSON.stringify(data);
     }
-  } catch {}
+  } catch { }
   return rawText;
 }
 
@@ -432,20 +493,11 @@ function friendlyError(err, language = 'fr') {
   const status = err.status || err.statusCode;
   const isFr = language !== 'en';
   if (status === 429) return isFr
-    ? "Je suis un peu débordé en ce moment — veuillez patienter quelques secondes et réessayer ! 🙏"
-    : "I'm a little overwhelmed right now — please wait a few seconds and try again! 🙏";
-  if (status === 401 || status === 403) return isFr
-    ? "J'ai un problème d'authentification. Veuillez contacter le personnel du restaurant."
-    : "I'm having an authentication issue. Please contact the restaurant staff.";
-  if (status >= 500) return isFr
-    ? "J'ai du mal à joindre mon système en ce moment. Veuillez réessayer dans un instant."
-    : "I'm having trouble reaching my brain right now. Please try again in a moment.";
-  if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') return isFr
-    ? "Je n'arrive pas à joindre le système du restaurant. Veuillez réessayer dans un moment."
-    : "I can't reach the restaurant system. Please try again shortly.";
+    ? "Le serveur est un peu débordé — veuillez patienter quelques secondes ! 🙏"
+    : "The server is a little overwhelmed — please wait a few seconds! 🙏";
   return isFr
-    ? "Une erreur s'est produite de mon côté. Veuillez réessayer ! 😊"
-    : "Something went wrong on my end. Please try again! 😊";
+    ? "Une erreur s'est produite avec le service d'IA locale. Veuillez réessayer ! 😊"
+    : "Something went wrong with the local AI service. Please try again! 😊";
 }
 
 // ─── Express app ────────────────────────────────────────────────────────────
@@ -542,34 +594,50 @@ app.post('/api/chat/stream', async (req, res) => {
     let iterations = 0;
     let totalAssistantText = '';
 
-    // Agentic loop runs inside the queue — limits concurrent Claude API calls to 5
+    // Agentic loop runs inside the queue — limits concurrent inference calls to 5
     await claudeQueue.add(async () => {
+      if (!model) await loadModel();
+
       while (iterations++ < 10) {
-        const stream = anthropic.messages.stream({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 4096,
-          system: getSystemPromptBlocks(language, customerProfile),
-          messages: truncateForApi(session.messages),
-          tools: getCachedTools()
+        const systemPrompt = await getSystemPromptBlocks(language, customerProfile);
+        const history = [
+          { role: 'system', content: systemPrompt },
+          ...truncateForApi(session.messages)
+        ];
+
+        const prediction = model.respond(history, {
+          maxTokens: 4096,
+          tools: anthropicTools
         });
 
-        stream.on('text', (text) => {
-          totalAssistantText += text;
-          send({ type: 'token', text });
-        });
+        let assistantMessage = { role: 'assistant', content: '', toolCalls: [] };
 
-        const finalMessage = await stream.finalMessage();
-        const usage = finalMessage.usage;
-        const { input_tokens, output_tokens } = usage;
-        const cache_read = usage.cache_read_input_tokens ?? 0;
-        const cache_write = usage.cache_creation_input_tokens ?? 0;
-        logger.info({ turn: iterations, in: input_tokens, out: output_tokens, cache_read, cache_write, total: input_tokens + output_tokens, queueSize: claudeQueue.size }, 'Claude tokens');
-        claudeTokensTotal.inc({ direction: 'in' }, input_tokens);
-        claudeTokensTotal.inc({ direction: 'out' }, output_tokens);
+        for await (const fragment of prediction) {
+          if (fragment.content) {
+            assistantMessage.content += fragment.content;
+            totalAssistantText += fragment.content;
+            send({ type: 'token', text: fragment.content });
+          }
+          if (fragment.toolCalls) {
+            assistantMessage.toolCalls.push(...fragment.toolCalls);
+          }
+        }
+
+        logger.info({ turn: iterations, queueSize: claudeQueue.size }, 'Inference turn completed');
         queueSize.set(claudeQueue.size);
-        session.messages.push({ role: 'assistant', content: stripImageUrls(finalMessage.content) });
 
-        if (finalMessage.stop_reason === 'end_turn') {
+        // Sanitize assistant content for history
+        session.messages.push({
+          role: 'assistant',
+          content: stripImageUrls([{ type: 'text', text: assistantMessage.content }])[0].text,
+          tool_calls: assistantMessage.toolCalls.length > 0 ? assistantMessage.toolCalls.map(tc => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: JSON.stringify(tc.parameters) }
+          })) : undefined
+        });
+
+        if (assistantMessage.toolCalls.length === 0) {
           if (totalAssistantText) {
             session.uiMessages.push({ id: uuidv4(), role: 'assistant', content: totalAssistantText, timestamp: new Date() });
           }
@@ -577,28 +645,35 @@ app.post('/api/chat/stream', async (req, res) => {
           break;
         }
 
-        if (finalMessage.stop_reason === 'tool_use') {
-          const toolResults = [];
-          for (const toolUse of finalMessage.content.filter((b) => b.type === 'tool_use')) {
-            send({ type: 'tool_call', name: toolUse.name });
-            try {
-              const result = await callMCPTool(toolUse.name, toolUse.input);
-              const raw = (result.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
-                || JSON.stringify(result);
-              const text = processToolResult(toolUse.name, raw);
-              // _toolName is a local tag used by compressOldMenuResults — not sent to Claude
-              toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: text, _toolName: toolUse.name });
-              if (toolUse.name === 'create_order' && toolUse.input?.customerName) {
-                send({ type: 'customer_identified', name: toolUse.input.customerName, phone: toolUse.input.customerPhone || '' });
-              }
-            } catch (err) {
-              toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify({ error: err.message }), is_error: true });
+        const toolResults = [];
+        for (const toolCall of assistantMessage.toolCalls) {
+          send({ type: 'tool_call', name: toolCall.name });
+          try {
+            const result = await callMCPTool(toolCall.name, toolCall.parameters);
+            const raw = (result.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n')
+              || JSON.stringify(result);
+            const text = processToolResult(toolCall.name, raw);
+
+            toolResults.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: text,
+              _toolName: toolCall.name // for local identification
+            });
+
+            if ((toolCall.name === 'save_customer_details' || toolCall.name === 'create_order') && toolCall.parameters?.customerName) {
+              send({ type: 'customer_identified', name: toolCall.parameters.customerName, phone: toolCall.parameters.customerPhone || '' });
             }
+          } catch (err) {
+            toolResults.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: JSON.stringify({ error: err.message }),
+              is_error: true
+            });
           }
-          session.messages.push({ role: 'user', content: toolResults });
-        } else {
-          break;
         }
+        session.messages.push(...toolResults);
       }
     });
 
@@ -606,7 +681,7 @@ app.post('/api/chat/stream', async (req, res) => {
     res.end();
   } catch (err) {
     logger.error({ status: err.status, err: err.message }, 'Stream error');
-    try { send({ type: 'error', message: friendlyError(err, language) }); } catch {}
+    try { send({ type: 'error', message: friendlyError(err, language) }); } catch { }
     res.end();
   }
 });
@@ -631,38 +706,61 @@ app.post('/api/chat', async (req, res) => {
     session.messages.push({ role: 'user', content: message.trim() });
     session.uiMessages.push({ id: uuidv4(), role: 'user', content: message.trim(), timestamp: new Date() });
 
-    let response, iterations = 0;
+    let finalAssistantText = '', iterations = 0;
     while (iterations++ < 10) {
-      response = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001', max_tokens: 4096,
-        system: getSystemPromptBlocks(language),
-        messages: truncateForApi(session.messages),
-        tools: getCachedTools()
-      });
-      session.messages.push({ role: 'assistant', content: stripImageUrls(response.content) });
+      if (!model) await loadModel();
 
-      if (response.stop_reason === 'end_turn') break;
-      if (response.stop_reason === 'tool_use') {
-        const toolResults = [];
-        for (const t of response.content.filter((b) => b.type === 'tool_use')) {
-          try {
-            const r = await callMCPTool(t.name, t.input);
-            const raw = (r.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
-            const text = processToolResult(t.name, raw);
-            toolResults.push({ type: 'tool_result', tool_use_id: t.id, content: text, _toolName: t.name });
-          } catch (err) {
-            toolResults.push({ type: 'tool_result', tool_use_id: t.id, content: JSON.stringify({ error: err.message }), is_error: true });
-          }
+      const systemPrompt = await getSystemPromptBlocks(language);
+      const history = [
+        { role: 'system', content: systemPrompt },
+        ...truncateForApi(session.messages)
+      ];
+
+      const prediction = model.respond(history, {
+        maxTokens: 4096,
+        tools: anthropicTools
+      });
+
+      let assistantMessage = { role: 'assistant', content: '', toolCalls: [] };
+
+      for await (const fragment of prediction) {
+        if (fragment.content) assistantMessage.content += fragment.content;
+        if (fragment.toolCalls) assistantMessage.toolCalls.push(...fragment.toolCalls);
+      }
+
+      session.messages.push({
+        role: 'assistant',
+        content: stripImageUrls([{ type: 'text', text: assistantMessage.content }])[0].text,
+        tool_calls: assistantMessage.toolCalls.length > 0 ? assistantMessage.toolCalls.map(tc => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: JSON.stringify(tc.parameters) }
+        })) : undefined
+      });
+
+      if (assistantMessage.toolCalls.length === 0) {
+        finalAssistantText = assistantMessage.content;
+        break;
+      }
+
+      const toolResults = [];
+      for (const tc of assistantMessage.toolCalls) {
+        try {
+          const r = await callMCPTool(tc.name, tc.parameters);
+          const raw = (r.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+          const text = processToolResult(tc.name, raw);
+          toolResults.push({ role: 'tool', tool_call_id: tc.id, content: text, _toolName: tc.name });
+        } catch (err) {
+          toolResults.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: err.message }), is_error: true });
         }
-        session.messages.push({ role: 'user', content: toolResults });
-      } else break;
+      }
+      session.messages.push(...toolResults);
     }
 
-    const finalText = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-    if (finalText) session.uiMessages.push({ id: uuidv4(), role: 'assistant', content: finalText, timestamp: new Date() });
+    if (finalAssistantText) session.uiMessages.push({ id: uuidv4(), role: 'assistant', content: finalAssistantText, timestamp: new Date() });
     await persistSession(sessionId, session);
 
-    res.json({ success: true, data: { response: finalText, sessionId } });
+    res.json({ success: true, data: { response: finalAssistantText, sessionId } });
   } catch (err) {
     logger.error({ status: err.status, err: err.message }, 'Chat error');
     res.status(500).json({ success: false, message: friendlyError(err, language) });
@@ -675,12 +773,12 @@ app.delete('/api/chat/:sessionId', async (req, res) => {
   const { sessionId } = req.params;
   sessions.delete(sessionId);
   activeSessions.set(sessions.size);
-  if (redis) redis.del(`session:${sessionId}`).catch(() => {});
+  if (redis) redis.del(`session:${sessionId}`).catch(() => { });
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (req.headers['x-client-id']) headers['x-client-id'] = req.headers['x-client-id'];
     await fetch(`${API_URL}/api/conversations/${sessionId}`, { method: 'DELETE', headers });
-  } catch {}
+  } catch { }
   res.json({ success: true, message: `Session ${sessionId} cleared` });
 });
 
@@ -709,7 +807,7 @@ app.get('/api/images/:type/:idx', async (req, res) => {
 app.get('/api/conversations', async (req, res) => {
   try {
     const qs = new URLSearchParams();
-    if (req.query.page)  qs.set('page',  req.query.page);
+    if (req.query.page) qs.set('page', req.query.page);
     if (req.query.limit) qs.set('limit', req.query.limit);
     const url = `${API_URL}/api/conversations${qs.toString() ? `?${qs}` : ''}`;
     const headers = {};
@@ -749,7 +847,7 @@ app.patch('/api/conversations/:sessionId/rename', async (req, res) => {
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
 
 async function shutdown() {
-  if (mcpClient) await mcpClient.close().catch(() => {});
+  if (mcpClient) await mcpClient.close().catch(() => { });
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);

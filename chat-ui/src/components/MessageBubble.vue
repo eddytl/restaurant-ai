@@ -129,6 +129,7 @@ watch(() => props.message.content, scheduleRender, { immediate: true });
 .bubble-text :deep(.md-h1)       { @apply text-[18px] font-bold text-tc-text my-3; }
 .bubble-text :deep(.md-h2)       { @apply text-base font-semibold text-tc-text mt-2.5 mb-1 border-b border-tc-border pb-1; }
 .bubble-text :deep(.md-h3)       { @apply text-[14px] font-semibold text-tc-text-2 my-2 uppercase tracking-wider; }
+.bubble-text :deep(.md-h4)       { @apply text-[13px] font-semibold text-tc-text my-2; }
 .bubble-text :deep(ul), .bubble-text :deep(ol) { @apply pl-5 my-1.5; }
 .bubble-text :deep(li)           { @apply my-0.5 leading-relaxed; }
 .bubble-text :deep(.inline-code) { @apply bg-tc-code-bg px-1.5 py-px rounded font-mono text-[12px] text-tc-code-text; }

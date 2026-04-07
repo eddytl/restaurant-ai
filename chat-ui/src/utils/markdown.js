@@ -113,22 +113,33 @@ export function parseMarkdown(raw, imageCache, placeholderSrc) {
     if (isTableRow(line)) { flushList(); flushCards(); tableLines.push(line); i++; continue; }
     else if (tableLines.length) flushTable();
 
+    const nextLine = lines[i + 1] ?? '';
+
+    // Card detection — handles [Image, Text] or [Text, Image]
     if (isImgLine(line)) {
       flushList();
-      const next = lines[i + 1] ?? '';
+      const hasDesc = nextLine.trim() !== '' && !isImgLine(nextLine) && !nextLine.match(/^#{1,4} /);
       const afterNext = lines[i + 2] ?? '';
-      const hasDesc = next.trim() !== '' && !isImgLine(next);
-      const hasExtra = hasDesc && afterNext.trim() !== '' && !isImgLine(afterNext) && !afterNext.match(/^#{1,3} /);
-      cardBuffer.push({ img: line, desc: hasDesc ? next : '', extra: hasExtra ? afterNext : '' });
+      const hasExtra = hasDesc && afterNext.trim() !== '' && !isImgLine(afterNext) && !afterNext.match(/^#{1,4} /);
+      cardBuffer.push({ img: line, desc: hasDesc ? nextLine : '', extra: hasExtra ? afterNext : '' });
       i += hasExtra ? 3 : (hasDesc ? 2 : 1);
+      continue;
+    } else if (line.trim() !== '' && !line.match(/^#{1,4} /) && isImgLine(nextLine)) {
+      // Text before image case
+      flushList();
+      cardBuffer.push({ img: nextLine, desc: line, extra: '' });
+      i += 2;
       continue;
     }
 
-    if (cardBuffer.length && line.trim() !== '') flushCards();
+    // Flush cards if we hit something else (that isn't a blank line or partial image)
+    const isPartialImageToken = line.startsWith('[') && !line.includes(']');
+    if (cardBuffer.length && line.trim() !== '' && !isPartialImageToken) flushCards();
 
-    if (line.match(/^### (.+)/)) { flushList(); processed.push(`<h3 class="md-h3">${line.replace(/^### /, '')}</h3>`); i++; continue; }
-    if (line.match(/^## (.+)/))  { flushList(); processed.push(`<h2 class="md-h2">${line.replace(/^## /, '')}</h2>`); i++; continue; }
-    if (line.match(/^# (.+)/))   { flushList(); processed.push(`<h1 class="md-h1">${line.replace(/^# /, '')}</h1>`); i++; continue; }
+    if (line.match(/^#{4} (.+)/))      { flushList(); processed.push(`<h4 class="md-h4">${line.replace(/^#{4} /, '')}</h4>`); i++; continue; }
+    if (line.match(/^### (.+)/))   { flushList(); processed.push(`<h3 class="md-h3">${line.replace(/^### /, '')}</h3>`); i++; continue; }
+    if (line.match(/^## (.+)/))    { flushList(); processed.push(`<h2 class="md-h2">${line.replace(/^## /, '')}</h2>`); i++; continue; }
+    if (line.match(/^# (.+)/))     { flushList(); processed.push(`<h1 class="md-h1">${line.replace(/^# /, '')}</h1>`); i++; continue; }
     if (line.match(/^&gt;\s+(.+)/)) { flushList(); processed.push(`<blockquote class="md-blockquote">${line.replace(/^&gt;\s+/, '')}</blockquote>`); i++; continue; }
 
     const uMatch = line.match(/^[-*•]\s+(.+)/);
@@ -138,7 +149,12 @@ export function parseMarkdown(raw, imageCache, placeholderSrc) {
     if (oMatch) { if (inList) flushList(); inOrderedList = true; listItems.push(oMatch[1]); i++; continue; }
 
     if (line.match(/^---+$/) || line.match(/^\*\*\*+$/)) { flushList(); processed.push('<hr class="md-hr"/>'); i++; continue; }
-    if (line.trim() === '') { flushList(); processed.push('<div class="line-break"></div>'); i++; continue; }
+    if (line.trim() === '') { 
+      if (cardBuffer.length) { i++; continue; } // Suppress blank lines if inside a menu card block
+      flushList(); processed.push('<div class="line-break"></div>'); i++; continue; 
+    }
+
+    if (isPartialImageToken) { i++; continue; } // Prevent partial tokens from rendering as text and breaking layout
 
     flushList();
     processed.push(`<p class="md-p">${line}</p>`);

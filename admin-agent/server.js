@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
-import Anthropic from '@anthropic-ai/sdk'
+import { LMStudioClient } from "@lmstudio/sdk"
 
 const app  = express()
 const PORT = process.env.PORT || 3002
@@ -10,7 +10,21 @@ const API_URL = process.env.API_URL || 'http://localhost:3001'
 app.use(cors())
 app.use(express.json())
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const client = new LMStudioClient({
+  baseUrl: process.env.LMSTUDIO_SERVER_URL || "ws://localhost:1234",
+})
+
+let model = null
+async function loadModel() {
+  const modelPath = process.env.LMSTUDIO_MODEL_PATH
+  if (!modelPath) {
+    const loaded = await client.llm.listLoaded()
+    if (loaded.length > 0) model = await client.llm.model(loaded[0].path || loaded[0].identifier)
+    else throw new Error("No models loaded in LM Studio")
+  } else {
+    model = await client.llm.model(modelPath)
+  }
+}
 
 // ─── Error sanitizer ──────────────────────────────────────────────────────────
 function userFriendlyError(err) {
@@ -26,8 +40,8 @@ function userFriendlyError(err) {
   if (msg.includes('JSON') || msg.includes('parse'))
     return 'Réponse IA invalide. Relancez l\'analyse.'
   if (msg.includes('fetch') || msg.includes('ECONNREFUSED'))
-    return 'Impossible de joindre l\'API. Vérifiez que le serveur est démarré.'
-  return 'Une erreur est survenue. Veuillez réessayer.'
+    return 'Impossible de joindre l\'API ou LM Studio. Vérifiez que les serveurs sont démarrés.'
+  return 'Une erreur est survenue avec le service d\'IA locale. Veuillez réessayer.'
 }
 
 // ─── Health ──────────────────────────────────────────────────────────────────
@@ -40,19 +54,17 @@ function setApiStatus(state) {
   apiStatus = { state, checkedAt: new Date().toISOString() }
 }
 
-// GET /api-status — returns last known Anthropic API state
+// GET /api-status — returns last known LM Studio API state
 app.get('/api-status', async (_req, res) => {
-  // If never called yet, do a lightweight probe (models list costs $0)
-  if (apiStatus.state === 'unknown') {
-    try {
-      await anthropic.models.list()
+  try {
+    const loaded = await client.llm.getLoadedModels()
+    if (loaded.length > 0) {
       setApiStatus('ok')
-    } catch (err) {
-      const msg = err?.message || ''
-      if (msg.includes('credit') || err?.status === 400) setApiStatus('insufficient_credits')
-      else if (err?.status === 401) setApiStatus('invalid_key')
-      else setApiStatus('error')
+    } else {
+      setApiStatus('no_models_loaded')
     }
+  } catch (err) {
+    setApiStatus('error')
   }
   res.json(apiStatus)
 })
@@ -179,14 +191,17 @@ Réponds UNIQUEMENT avec ce JSON :
 }`
 
     setApiStatus('ok')
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 8192,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-    })
+    if (!model) await loadModel()
 
-    const raw = message.content[0]?.text || '{}'
+    const prediction = model.respond([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ], { maxTokens: 8192 })
+
+    let raw = ''
+    for await (const fragment of prediction) {
+      raw += fragment.content || ''
+    }
     // Strip possible markdown code fences
     const clean = raw.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim()
 
@@ -245,16 +260,16 @@ ${langNote}
 - **Agences actives** : ${stats.activeBranches}`
 
     setApiStatus('ok')
-    const stream = await anthropic.messages.stream({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
-    })
+    if (!model) await loadModel()
 
-    for await (const chunk of stream) {
-      if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
-        send({ type: 'delta', text: chunk.delta.text })
+    const prediction = model.respond([
+      { role: 'system', content: systemPrompt },
+      ...messages.map(m => ({ role: m.role, content: m.content }))
+    ], { maxTokens: 4096 })
+
+    for await (const chunk of prediction) {
+      if (chunk.content) {
+        send({ type: 'delta', text: chunk.content })
       }
     }
 
